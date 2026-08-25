@@ -56,12 +56,35 @@
 
         var p = particles[i];
 
-        // attract to the mouse position (same pull, no matter how far away)
+        // per-particle randomness, calculated from the particle index (a classic shader "random" trick)
+        // this gives the same value every frame for the same particle
+        let random = fract(sin(f32(i) * 12.9898) * 43758.5453);
+        let random2 = fract(sin(f32(i) * 78.233) * 43758.5453);
+
         let toMouse = uniforms.mouse - p.position;
-        let direction = toMouse / max(length(toMouse), 0.05);
-        p.velocity += direction * uniforms.attract * uniforms.deltaTime * 3.0;
-        // slow down a bit
-        p.velocity *= 0.98;
+        let dist = length(toMouse);
+        let direction = toMouse / max(dist, 0.001);
+        // a vector at 90 degrees to the direction of the mouse
+        let tangent = vec2f(-direction.y, direction.x);
+        // half of the particles rotate clockwise, the other half counter clockwise
+        let spin = select(-1.0, 1.0, random > 0.5);
+
+        // pull towards the mouse. The closer the particle gets, the weaker the pull, so it overshoots instead of stopping
+        let pull = direction * smoothstep(0.0, 0.4, dist) * (2.0 + random2 * 2.0);
+        // push sideways: this is what makes the particles rotate around the mouse
+        let swirl = tangent * spin * (0.5 + random) * 2.0;
+
+        p.velocity += (pull + swirl) * uniforms.attract * uniforms.deltaTime;
+        // a little bit of drag
+        p.velocity *= 0.995;
+
+        // every particle has its own speed limit: faster particles end up in a bigger orbit
+        let maxSpeed = 0.3 + random * 0.7;
+        let speed = length(p.velocity);
+        if (speed > maxSpeed) {
+          p.velocity *= maxSpeed / speed;
+        }
+
         p.position += p.velocity * uniforms.deltaTime;
 
         // bounce at the edges
@@ -99,7 +122,7 @@
         var output: VertexOutput;
         output.position = vec4f(particle.position + corners[vertexIndex] * size, 0.0, 1.0);
         let speed = length(particle.velocity);
-        output.color = mix(vec3f(0.2, 0.5, 1.0), vec3f(1.0, 0.9, 0.3), min(speed * 2.0, 1.0));
+        output.color = mix(vec3f(0.2, 0.5, 1.0), vec3f(1.0, 0.9, 0.3), min(speed, 1.0));
         return output;
       }
 

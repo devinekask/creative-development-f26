@@ -1270,7 +1270,7 @@ Go through the rest of the code, it should look familiar by now. Some things to 
 
 Compute shaders are the big new feature of WebGPU: you can run any calculation on the GPU, in parallel, without drawing a single pixel. The classic example is a particle system: we let the GPU update thousands of particles every frame, and then draw them.
 
-Open up [compute/01-particles.html](compute/01-particles.html). It simulates 20.000 particles which are attracted to your mouse cursor when hovering over the canvas.
+Open up [compute/01-particles.html](compute/01-particles.html). It simulates 20.000 particles which are attracted to your mouse cursor when hovering over the canvas, and end up swirling around it.
 
 Read through the [Compute Shader Basics](https://webgpufundamentals.org/webgpu/lessons/webgpu-compute-shaders.html) on WebGPU Fundamentals first.
 
@@ -1298,12 +1298,35 @@ fn simulate(@builtin(global_invocation_id) id: vec3u) {
 
   var p = particles[i];
 
-  // attract to the mouse position (same pull, no matter how far away)
+  // per-particle randomness, calculated from the particle index (a classic shader "random" trick)
+  // this gives the same value every frame for the same particle
+  let random = fract(sin(f32(i) * 12.9898) * 43758.5453);
+  let random2 = fract(sin(f32(i) * 78.233) * 43758.5453);
+
   let toMouse = uniforms.mouse - p.position;
-  let direction = toMouse / max(length(toMouse), 0.05);
-  p.velocity += direction * uniforms.attract * uniforms.deltaTime * 3.0;
-  // slow down a bit
-  p.velocity *= 0.98;
+  let dist = length(toMouse);
+  let direction = toMouse / max(dist, 0.001);
+  // a vector at 90 degrees to the direction of the mouse
+  let tangent = vec2f(-direction.y, direction.x);
+  // half of the particles rotate clockwise, the other half counter clockwise
+  let spin = select(-1.0, 1.0, random > 0.5);
+
+  // pull towards the mouse. The closer the particle gets, the weaker the pull, so it overshoots instead of stopping
+  let pull = direction * smoothstep(0.0, 0.4, dist) * (2.0 + random2 * 2.0);
+  // push sideways: this is what makes the particles rotate around the mouse
+  let swirl = tangent * spin * (0.5 + random) * 2.0;
+
+  p.velocity += (pull + swirl) * uniforms.attract * uniforms.deltaTime;
+  // a little bit of drag
+  p.velocity *= 0.995;
+
+  // every particle has its own speed limit: faster particles end up in a bigger orbit
+  let maxSpeed = 0.3 + random * 0.7;
+  let speed = length(p.velocity);
+  if (speed > maxSpeed) {
+    p.velocity *= maxSpeed / speed;
+  }
+
   p.position += p.velocity * uniforms.deltaTime;
 
   // bounce at the edges
@@ -1317,6 +1340,13 @@ fn simulate(@builtin(global_invocation_id) id: vec3u) {
   particles[i] = p;
 }
 ```
+
+A couple of things are going on in there:
+
+- There is no `Math.random()` in a shader. The `fract(sin(i * 12.9898) * 43758.5453)` line is a well known trick to turn a number (here: the particle index) into a pseudo-random value between 0 and 1. It's the same value every frame for the same particle, so every particle gets its own personality.
+- If we'd only pull the particles towards the mouse, they would all end up sitting on the cursor. By pushing them **sideways** as well (the `tangent` vector is the direction to the mouse, rotated by 90 degrees), they start rotating around it. Half of them spin one way, the other half the other way.
+- The pull fades out when a particle gets close to the mouse (`smoothstep`), so particles overshoot instead of stopping.
+- Every particle has its own speed limit. The faster a particle is allowed to go, the bigger its orbit becomes, so we get a swirling cloud instead of one thin ring.
 
 To draw the particles, we reuse a trick from the 2d chapter: the vertex shader has 6 hardcoded corners of a small square. This time, we draw that square 20.000 times using **instancing**: `pass.draw(6, particleCount)`. The vertex shader receives an `@builtin(instance_index)`, which we use to look up the particle position in the same storage buffer:
 
@@ -1345,6 +1375,8 @@ renderPass.end();
 
 Some things to try:
 
+- make all particles spin in the same direction (get rid of `spin`)
+- play with the numbers: what happens with more drag, or a stronger sideways push?
 - wrap the particles around the edges instead of bouncing
 - make the size of a particle depend on its speed
 - add a `time` uniform and cycle the colors
