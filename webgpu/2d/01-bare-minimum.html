@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGPU</title>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <script type="module">
+    const canvas = document.querySelector('#c');
+
+    // 1. get access to the GPU
+    if (!navigator.gpu) {
+      document.body.textContent = 'WebGPU is not supported in this browser';
+      throw new Error('WebGPU not supported');
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+
+    // 2. connect the canvas to the gpu device
+    const context = canvas.getContext('webgpu');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format });
+
+    // 3. the shaders, written in WGSL
+    const shaderModule = device.createShaderModule({ code: `
+      @vertex
+      fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4f {
+        let positions = array(
+          vec2f(-0.5,  0.5),
+          vec2f( 0.5,  0.0),
+          vec2f(-0.5, -0.5),
+        );
+        return vec4f(positions[vertexIndex], 0.0, 1.0);
+      }
+
+      @fragment
+      fn fragmentMain() -> @location(0) vec4f {
+        return vec4f(1.0, 0.0, 0.0, 1.0);
+      }
+    `});
+
+    // 4. a render pipeline combines the shaders with some settings (which format do we draw to?)
+    const pipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: shaderModule, entryPoint: 'vertexMain' },
+      fragment: { module: shaderModule, entryPoint: 'fragmentMain', targets: [{ format }] },
+    });
+
+    // 5. draw
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: context.getCurrentTexture().createView(),
+        clearValue: [0, 0, 0, 1],
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    pass.setPipeline(pipeline);
+    pass.draw(3); // 3 vertices = 1 triangle
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+  </script>
+</body>
+</html>

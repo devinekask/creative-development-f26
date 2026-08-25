@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGPU</title>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <video id="video" preload="auto" autoplay playsinline muted></video>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.15.0/gsap.min.js"></script>
+
+  <script type="module">
+    const canvas = document.querySelector('#c');
+    const $video = document.querySelector('#video');
+
+    if (!navigator.gpu) {
+      document.body.textContent = 'WebGPU is not supported in this browser';
+      throw new Error('WebGPU not supported');
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+
+    const context = canvas.getContext('webgpu');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format, alphaMode: 'premultiplied' });
+
+    const shaderModule = device.createShaderModule({ code: `
+      struct VertexOutput {
+        @builtin(position) position: vec4f,
+        @location(0) uv: vec2f,
+      };
+
+      @vertex
+      fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+        // 2 triangles, filling the whole canvas
+        let positions = array(
+          vec2f(-1.0,  1.0),
+          vec2f( 1.0,  1.0),
+          vec2f(-1.0, -1.0),
+
+          vec2f(-1.0, -1.0),
+          vec2f( 1.0,  1.0),
+          vec2f( 1.0, -1.0),
+        );
+        let position = positions[vertexIndex];
+
+        var output: VertexOutput;
+        output.position = vec4f(position, 0.0, 1.0);
+        // convert clip space (-1 to 1, y up) to uv space (0 to 1, y down)
+        output.uv = vec2f(position.x + 1.0, 1.0 - position.y) * 0.5;
+        return output;
+      }
+
+      struct Uniforms {
+        dispFactor: f32,
+        effectFactor: f32,
+        phase: f32,
+      };
+      @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+      @group(0) @binding(1) var imageSampler: sampler;
+      @group(0) @binding(2) var image: texture_2d<f32>;
+
+      @fragment
+      fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
+        let dist = length(uv - vec2f(0.5, 0.5));
+
+        var disp = vec4f(0.02, 0.02, 0.02, 0.02);
+        disp = vec4f(disp.rgb * sin(dist * 20.0 + uniforms.phase), disp.a);
+
+        let distortedPosition = vec2f(uv.x + uniforms.dispFactor * (disp.r * uniforms.effectFactor), uv.y);
+        let _texture = textureSample(image, imageSampler, distortedPosition);
+
+        return _texture;
+      }
+    `});
+
+    const pipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: shaderModule, entryPoint: 'vertexMain' },
+      fragment: { module: shaderModule, entryPoint: 'fragmentMain', targets: [{ format }] },
+    });
+
+    const sampler = device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'clamp-to-edge',
+      addressModeV: 'clamp-to-edge',
+    });
+
+    // the offsets (in floats) of each uniform value, must match the Uniforms struct in the shader
+    const uniforms = { dispFactor: 0, effectFactor: 1, phase: 2 };
+    const uniformValues = new Float32Array(4);
+    const setUniform = (name, ...values) => uniformValues.set(values, uniforms[name]);
+    const uniformBuffer = device.createBuffer({
+      size: uniformValues.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    let bindGroup;
+    let videoTexture;
+
+    const properties = {
+      effectFactor: -0.65,
+      dispFactor: 0.0
+    };
+
+    const init = async () => {
+      $video.addEventListener('canplay', () => {
+        console.log('can play');
+
+        videoTexture = device.createTexture({
+          size: [$video.videoWidth, $video.videoHeight],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+        });
+        uploadVideoFrame();
+
+        bindGroup = device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: uniformBuffer } },
+            { binding: 1, resource: sampler },
+            { binding: 2, resource: videoTexture.createView() },
+          ],
+        });
+
+        canvas.width = $video.videoWidth;
+        canvas.height = $video.videoHeight;
+
+        canvas.addEventListener('mouseover', () => gsap.to(properties, { duration: 1, ease: "power4.out", dispFactor: 1}));
+        canvas.addEventListener('mouseout', () => gsap.to(properties, { duration: 1, ease: "power4.out", dispFactor: 0}));
+
+        drawScene();
+      });
+
+      $video.src = "videos/showreel-2023.mp4";
+    };
+
+    const drawScene = (time = 0) => {
+      setUniform('dispFactor', properties.dispFactor);
+      setUniform('effectFactor', properties.effectFactor);
+      setUniform('phase', time / 100);
+      device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
+          clearValue: [0, 0, 0, 0],
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(6); // 2 triangles = 6 vertices
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+
+      requestAnimationFrame(drawScene);
+    };
+
+    const loadImage = async (src) => {
+      const response = await fetch(src);
+      const blob = await response.blob();
+      return createImageBitmap(blob);
+    };
+
+    const map = (value, x1, y1, x2, y2) => (value - x1) * (y2 - x2) / (y1 - x1) + x2;
+
+    const createTextureFromImage = (image) => {
+      const texture = device.createTexture({
+        size: [image.width, image.height],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+      device.queue.copyExternalImageToTexture({ source: image }, { texture }, [image.width, image.height]);
+      return texture;
+    };
+
+    const uploadVideoFrame = () => {
+      device.queue.copyExternalImageToTexture({ source: $video }, { texture: videoTexture }, [$video.videoWidth, $video.videoHeight]);
+    };
+
+    init();
+  </script>
+</body>
+</html>

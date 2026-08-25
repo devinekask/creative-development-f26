@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGPU</title>
+</head>
+<body>
+  <div>
+    <input type="range" id="brightness" min="-1" max="1" step="0.1" />Brightness<br />
+    <input type="range" id="contrast" min="0" max="2" step="0.1" />Contrast<br />
+    <input type="range" id="exposure" min="0" max="2" step="0.1" />Exposure<br />
+    <input type="range" id="saturation" min="0" max="2" step="0.1" />Saturation<br />
+    <select id="filter"></select>
+    <button id="save">Save</button>
+  </div>
+
+  <canvas id="c"></canvas>
+
+  <script type="module">
+    import * as mat4 from "./js/gl-matrix/mat4.js";
+    import * as vec4 from "./js/gl-matrix/vec4.js";
+
+    const canvas = document.querySelector('#c');
+    const $brightness = document.getElementById('brightness');
+    const $contrast = document.getElementById('contrast');
+    const $exposure = document.getElementById('exposure');
+    const $saturation = document.getElementById('saturation');
+    const $filter = document.getElementById('filter');
+    const $button = document.getElementById('save');
+
+    if (!navigator.gpu) {
+      document.body.textContent = 'WebGPU is not supported in this browser';
+      throw new Error('WebGPU not supported');
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+
+    const context = canvas.getContext('webgpu');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format, alphaMode: 'premultiplied' });
+
+    const shaderModule = device.createShaderModule({ code: `
+      struct VertexOutput {
+        @builtin(position) position: vec4f,
+        @location(0) uv: vec2f,
+      };
+
+      @vertex
+      fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+        // 2 triangles, filling the whole canvas
+        let positions = array(
+          vec2f(-1.0,  1.0),
+          vec2f( 1.0,  1.0),
+          vec2f(-1.0, -1.0),
+
+          vec2f(-1.0, -1.0),
+          vec2f( 1.0,  1.0),
+          vec2f( 1.0, -1.0),
+        );
+        let position = positions[vertexIndex];
+
+        var output: VertexOutput;
+        output.position = vec4f(position, 0.0, 1.0);
+        // convert clip space (-1 to 1, y up) to uv space (0 to 1, y down)
+        output.uv = vec2f(position.x + 1.0, 1.0 - position.y) * 0.5;
+        return output;
+      }
+
+      struct Uniforms {
+        matrix: mat4x4f,
+        offset: vec4f,
+      };
+      @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+      @group(0) @binding(1) var imageSampler: sampler;
+      @group(0) @binding(2) var image: texture_2d<f32>;
+
+      @fragment
+      fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
+        let sampleColor = textureSample(image, imageSampler, uv);
+        return uniforms.matrix * sampleColor + uniforms.offset;
+      }
+    `});
+
+    const pipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: shaderModule, entryPoint: 'vertexMain' },
+      fragment: { module: shaderModule, entryPoint: 'fragmentMain', targets: [{ format }] },
+    });
+
+    const sampler = device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'clamp-to-edge',
+      addressModeV: 'clamp-to-edge',
+    });
+
+    // the offsets (in floats) of each uniform value, must match the Uniforms struct in the shader
+    // a mat4x4f takes 16 floats, a vec4f takes 4 floats
+    const uniforms = { matrix: 0, offset: 16 };
+    const uniformValues = new Float32Array(20);
+    const setUniform = (name, ...values) => uniformValues.set(values, uniforms[name]);
+    const uniformBuffer = device.createBuffer({
+      size: uniformValues.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    let bindGroup;
+
+    const matrix = mat4.create();
+    const offset = vec4.create();
+
+    const u_brightnessMatrix = mat4.create();
+    const u_brightnessOffset = vec4.create();
+
+    const u_contrastMatrix = mat4.create();
+    const u_contrastOffset = vec4.create();
+
+    const u_exposureMatrix = mat4.create();
+    const u_exposureOffset = vec4.create();
+
+    const u_saturationMatrix = mat4.create();
+    const u_saturationOffset = vec4.create();
+
+    const filters = {
+        // make sure the original style is in the list
+        'original': {
+            label: 'Original',
+            matrix: () => [
+              1, 0, 0, 0, 0,
+              0, 1, 0, 0, 0,
+              0, 0, 1, 0, 0,
+              0, 0, 0, 1, 0,
+            ]
+        },
+        // the default filters
+        'chrome': {
+            label: 'Bright',
+            matrix: () => [
+                1.398,-0.316, 0.065,-0.273, 0.201,
+                -0.051, 1.278,-0.080,-0.273, 0.201,
+                -0.051, 0.119, 1.151,-0.290, 0.215,
+                    0.000, 0.000, 0.000, 1.000, 0.000
+            ]
+        },
+        'fade': {
+            label: 'Dark',
+            matrix: () => [
+                1.073,-0.015, 0.092,-0.115,-0.017,
+                0.107, 0.859, 0.184,-0.115,-0.017,
+                0.015, 0.077, 1.104,-0.115,-0.017,
+                0.000, 0.000, 0.000, 1.000, 0.000
+            ]
+        },
+        'mono': {
+            label: 'Mono',
+            matrix: () => [
+                0.212, 0.715, 0.114, 0.000, 0.000,
+                0.212, 0.715, 0.114, 0.000, 0.000,
+                0.212, 0.715, 0.114, 0.000, 0.000,
+                0.000, 0.000, 0.000, 1.000, 0.000
+            ]
+        },
+        'noir': {
+            label: 'Noir',
+            matrix: () => [
+                0.150, 1.300,-0.250, 0.100,-0.200,
+                0.150, 1.300,-0.250, 0.100,-0.200,
+                0.150, 1.300,-0.250, 0.100,-0.200,
+                0.000, 0.000, 0.000, 1.000, 0.000
+            ]
+        },
+        // add your own filters
+        'sepia': {
+            label: 'Sepia',
+            matrix: () => [
+                0.394, 0.769, 0.189, 0.000, 0.000,
+                0.349, 0.686, 0.168, 0.000, 0.000,
+                0.272, 0.534, 0.131, 0.000, 0.000,
+                0.000, 0.000, 0.000, 1.000, 0.000
+            ]
+        }
+    };
+
+    let selectedFilter = filters.original;
+
+    const init = async () => {
+      const imgTexture = await loadImage("images/devine_selectie-087.jpg");
+      const texture = createTextureFromImage(imgTexture);
+
+      bindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: sampler },
+          { binding: 2, resource: texture.createView() },
+        ],
+      });
+
+      canvas.width = imgTexture.width;
+      canvas.height = imgTexture.height;
+
+      $brightness.addEventListener('input', e => {
+        const value = $brightness.value;
+        u_brightnessOffset[0] = value;
+        u_brightnessOffset[1] = value;
+        u_brightnessOffset[2] = value;
+      });
+
+      $contrast.addEventListener('input', e => {
+        const x = $contrast.value;
+        const y = (1 - x) / 2;
+
+        u_contrastMatrix[0] = x;
+        u_contrastMatrix[5] = x;
+        u_contrastMatrix[10] = x;
+        u_contrastMatrix[15] = x;
+
+        u_contrastOffset[0] = y;
+        u_contrastOffset[1] = y;
+        u_contrastOffset[2] = y;
+      });
+
+      $exposure.addEventListener('input', e => {
+        const x = $exposure.value;
+
+        u_exposureMatrix[0] = x;
+        u_exposureMatrix[5] = x;
+        u_exposureMatrix[10] = x;
+        u_exposureMatrix[15] = x;
+      });
+
+      $saturation.addEventListener('input', e => {
+        // https://www.w3.org/TR/WCAG20/#relativeluminancedef
+        const lr = 0.2126;
+        const lg = 0.7152;
+        const lb = 0.0722;
+
+        const s = parseFloat($saturation.value);
+        const sr = (1 - s) * lr;
+        const sg = (1 - s) * lg;
+        const sb = (1 - s) * lb;
+
+        u_saturationMatrix[0] = sr+s;
+        u_saturationMatrix[1] = sg;
+        u_saturationMatrix[2] = sb;
+
+        u_saturationMatrix[4] = sr;
+        u_saturationMatrix[5] = sg+s;
+        u_saturationMatrix[6] = sb;
+
+        u_saturationMatrix[8] = sr;
+        u_saturationMatrix[9] = sg;
+        u_saturationMatrix[10] = sb+s;
+      });
+
+      for (const filterName in filters) {
+        if (filters.hasOwnProperty(filterName)) {
+          const filter = filters[filterName];
+          const $option = document.createElement('option');
+          $option.value = filterName;
+          $option.textContent = filter.label;
+          $filter.appendChild($option);
+        }
+      }
+
+      $filter.addEventListener('input', (e) => {
+        const filterName = $filter.value;
+        selectedFilter = filters[filterName];
+      });
+
+      $button.addEventListener('click', (e) => {
+        mat4.identity(matrix);
+        mat4.multiply(matrix, matrix, u_brightnessMatrix);
+        mat4.multiply(matrix, matrix, u_contrastMatrix);
+        mat4.multiply(matrix, matrix, u_exposureMatrix);
+        mat4.multiply(matrix, matrix, u_saturationMatrix);
+
+        const selectedFilterResult = selectedFilter.matrix();
+        const filterMatrix = mat4.fromValues(
+          selectedFilterResult[0], selectedFilterResult[1], selectedFilterResult[2], selectedFilterResult[3],
+          selectedFilterResult[5], selectedFilterResult[6], selectedFilterResult[7], selectedFilterResult[8],
+          selectedFilterResult[10], selectedFilterResult[11], selectedFilterResult[12], selectedFilterResult[13],
+          selectedFilterResult[15], selectedFilterResult[16], selectedFilterResult[17], selectedFilterResult[18],
+        );
+        const filterOffset = vec4.fromValues(selectedFilterResult[4], selectedFilterResult[9], selectedFilterResult[14], selectedFilterResult[19]);
+        mat4.multiply(matrix, matrix, filterMatrix);
+
+        vec4.zero(offset);
+        vec4.add(offset, offset, u_brightnessOffset);
+        vec4.add(offset, offset, u_contrastOffset);
+        vec4.add(offset, offset, u_exposureOffset);
+        vec4.add(offset, offset, u_saturationOffset);
+        vec4.add(offset, offset, filterOffset);
+
+        // log the "baked" matrix and offset, so we can copy them into our next project
+        console.log(matrix);
+        console.log(offset);
+      });
+
+      drawScene();
+    };
+
+    const drawScene = () => {
+      mat4.identity(matrix);
+      mat4.multiply(matrix, matrix, u_brightnessMatrix);
+      mat4.multiply(matrix, matrix, u_contrastMatrix);
+      mat4.multiply(matrix, matrix, u_exposureMatrix);
+      mat4.multiply(matrix, matrix, u_saturationMatrix);
+
+      const selectedFilterResult = selectedFilter.matrix();
+      const filterMatrix = mat4.fromValues(
+        selectedFilterResult[0], selectedFilterResult[1], selectedFilterResult[2], selectedFilterResult[3],
+        selectedFilterResult[5], selectedFilterResult[6], selectedFilterResult[7], selectedFilterResult[8],
+        selectedFilterResult[10], selectedFilterResult[11], selectedFilterResult[12], selectedFilterResult[13],
+        selectedFilterResult[15], selectedFilterResult[16], selectedFilterResult[17], selectedFilterResult[18],
+      );
+      const filterOffset = vec4.fromValues(selectedFilterResult[4], selectedFilterResult[9], selectedFilterResult[14], selectedFilterResult[19]);
+      mat4.multiply(matrix, matrix, filterMatrix);
+
+      vec4.zero(offset);
+      vec4.add(offset, offset, u_brightnessOffset);
+      vec4.add(offset, offset, u_contrastOffset);
+      vec4.add(offset, offset, u_exposureOffset);
+      vec4.add(offset, offset, u_saturationOffset);
+      vec4.add(offset, offset, filterOffset);
+      // our matrices are built row by row, but WGSL expects them column by column
+      // (in WebGL, this was the "transpose" flag of uniformMatrix4fv)
+      mat4.transpose(matrix, matrix);
+      setUniform('matrix', ...matrix);
+      setUniform('offset', ...offset);
+      device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
+          clearValue: [0, 0, 0, 0],
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(6); // 2 triangles = 6 vertices
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+
+      requestAnimationFrame(drawScene);
+    };
+
+    const loadImage = async (src) => {
+      const response = await fetch(src);
+      const blob = await response.blob();
+      return createImageBitmap(blob);
+    };
+
+    const map = (value, x1, y1, x2, y2) => (value - x1) * (y2 - x2) / (y1 - x1) + x2;
+
+    const createTextureFromImage = (image) => {
+      const texture = device.createTexture({
+        size: [image.width, image.height],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+      device.queue.copyExternalImageToTexture({ source: image }, { texture }, [image.width, image.height]);
+      return texture;
+    };
+
+    init();
+  </script>
+</body>
+</html>
