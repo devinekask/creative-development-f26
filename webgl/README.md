@@ -181,7 +181,7 @@ You should see an image with the red channel boosted to max:
 
 ![photo with red boosted to max](images/red-image.jpg)
 
-Go through the post [Colour correction with webgl](https://timseverien.com/posts/2020-06-19-colour-correction-with-webgl/) until you reach Colour Matrices. We will cover that a bit later.
+Go through the post [Colour correction with webgl](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) until you reach Colour Matrices. We will cover that a bit later.
 
 > **Note**: The shader code in that blog post is webgl 1 code. You'll need to adjust the code to webgl 2.0. The main differences are:<br />- gl_FragColor is replaced by (out vec4) outColor<br />- the varying v_uv is replaced by (in vec2) uv<br />- we are using u_image as a our image, some examples use u_map instead.<br />- use "texture" intead of "texture2D" to get the pixel information.
 
@@ -233,7 +233,7 @@ You should end up with something like this:
 
 Next up, we're going to be using color matrices as a more flexible way of modifying our target color. Each of our filters is currently a multiplication and / or addition of a vector with our original color. By using matrices, we can get rid of the separate formulas in our shader, and use a matrix input which will contain the multiplication and / or sum factors.
 
-Continue [Tim Severien's post on colour correction](https://timseverien.com/posts/2020-06-19-colour-correction-with-webgl/) with the matrix manipulation part. 
+Continue [Tim Severien's post on colour correction](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) with the matrix manipulation part. 
 
 Build a simple slider ui, so you can modify brightness, contrast, exposure and saturation from your javascript code.
 
@@ -336,7 +336,7 @@ You can [check out the solution](2d/04a-color-matrix.html) when you're stuck.
 
 ### Effects
 
-Continue with [the post on colour corrections](https://timseverien.com/posts/2020-06-19-colour-correction-with-webgl/) and implement the effects part. The big difference is you'll be using precalculated matrices instead of having a separate effect matrix and that that respective post was written for WebGL 1.0.
+Continue with [the post on colour corrections](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) and implement the effects part. The big difference is you'll be using precalculated matrices instead of having a separate effect matrix and that that respective post was written for WebGL 1.0.
 
 You can find a couple of [effect matrices in the PixiJS ColorMatrixFilter class](https://github.com/pixijs/pixijs/blob/main/src/filters/defaults/color-matrix/ColorMatrixFilter.ts).
 
