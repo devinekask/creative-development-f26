@@ -9,9 +9,6 @@
   <canvas id="c"></canvas>
 
   <script type="module">
-    import * as mat4 from "./js/gl-matrix/mat4.js";
-    import * as vec4 from "./js/gl-matrix/vec4.js";
-
     const canvas = document.querySelector('#c');
 
     if (!navigator.gpu) {
@@ -53,17 +50,55 @@
       }
 
       struct Uniforms {
-        matrix: mat4x4f,
-        offset: vec4f,
+        effectFactor: f32,
       };
       @group(0) @binding(0) var<uniform> uniforms: Uniforms;
       @group(0) @binding(1) var imageSampler: sampler;
       @group(0) @binding(2) var image: texture_2d<f32>;
 
+      struct HSL {
+        h: f32,
+        s: f32,
+        l: f32,
+      };
+
+      fn rgbToHsl(rgb: vec3f) -> HSL {
+        let cMin = min(min(rgb.r, rgb.b), rgb.g);
+        let cMax = max(max(rgb.r, rgb.b), rgb.g);
+        let delta = cMax - cMin;
+        let l = (cMax + cMin) / 2.0;
+        if (delta == 0.0) {
+          return HSL(0, 0, l);
+        }
+        var h = 0.0;
+        if (rgb.r == cMax) {
+          h = (rgb.g - rgb.b) / delta;
+        } else if (rgb.g == cMax) {
+          h = 2.0 + (rgb.b - rgb.r) / delta;
+        } else {
+          h = 4.0 + (rgb.r - rgb.g) / delta;
+        }
+        h = h / 6.0;
+        let s = delta / (1.0 - abs(2.0 * l - 1.0));
+        return HSL(h, s, l);
+      }
+
+      fn hslToRgb(hsl: HSL) -> vec3f {
+        let c = vec3f(fract(hsl.h), clamp(vec2f(hsl.s, hsl.l), vec2f(0), vec2f(1)));
+        let rgb = clamp(abs((c.x * 6.0 + vec3f(0.0, 4.0, 2.0)) % 6.0 - 3.0) - 1.0, vec3f(0), vec3f(1));
+        return c.z + c.y * (rgb - 0.5) * (1.0 - abs(2.0 * c.z - 1.0));
+      }
+
+      fn adjustHSL(color: vec3f, adjust: HSL) -> vec3f {
+        let hsl = rgbToHsl(color);
+        return hslToRgb(HSL(hsl.h + adjust.h, hsl.s + adjust.s, hsl.l + adjust.l));
+      }
+
       @fragment
       fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
-        let sampleColor = textureSample(image, imageSampler, uv);
-        return uniforms.matrix * sampleColor + uniforms.offset;
+        var sampleColor = textureSample(image, imageSampler, uv);
+        sampleColor = vec4f(adjustHSL(sampleColor.rgb, HSL(uniforms.effectFactor, 0.0, 0.0)), sampleColor.a);
+        return sampleColor;
       }
     `});
 
@@ -81,9 +116,8 @@
     });
 
     // the offsets (in floats) of each uniform value, must match the Uniforms struct in the shader
-    // a mat4x4f takes 16 floats, a vec4f takes 4 floats
-    const uniforms = { matrix: 0, offset: 16 };
-    const uniformValues = new Float32Array(20);
+    const uniforms = { effectFactor: 0 };
+    const uniformValues = new Float32Array(4);
     const setUniform = (name, ...values) => uniformValues.set(values, uniforms[name]);
     const uniformBuffer = device.createBuffer({
       size: uniformValues.byteLength,
@@ -92,14 +126,7 @@
 
     let bindGroup;
 
-    // a baked matrix from the previous exercise (already in column order, no transpose needed)
-    const matrix = mat4.fromValues(
-      0.590999960899353, 0.5235000252723694, 0.40800002217292786, 0,
-      1.153499960899353, 1.0290000438690186, 0.8009999990463257, 0,
-      0.28349998593330383, 0.25200000405311584, 0.1965000033378601, 0,
-      0, 0, 0, 1.5
-    );
-    const offset = vec4.fromValues(-0.25, -0.25, -0.25, 0);
+    let effectFactor = 0;
 
     const init = async () => {
       const imgTexture = await loadImage("images/devine_selectie-087.jpg");
@@ -117,12 +144,14 @@
       canvas.width = imgTexture.width;
       canvas.height = imgTexture.height;
 
+      // a full sweep of the mouse = a full rotation of the hue wheel
+      canvas.addEventListener('mousemove', (e) => effectFactor = map(e.offsetX, 0, canvas.width, -0.5, 0.5));
+
       drawScene();
     };
 
     const drawScene = () => {
-      setUniform('matrix', ...matrix);
-      setUniform('offset', ...offset);
+      setUniform('effectFactor', effectFactor);
       device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 
       const encoder = device.createCommandEncoder();

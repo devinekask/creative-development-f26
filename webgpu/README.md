@@ -206,13 +206,136 @@ You should see an image with the red channel boosted to max:
 
 ![photo with red boosted to max](images/red-image.jpg)
 
-Go through the post [Colour correction with webgl](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) until you reach Colour Matrices. We will cover that a bit later.
+Let's implement the classic color adjustments: brightness, contrast, channel flip, saturation and hue. Each of them is a small WGSL function which takes the sampled color (and an adjustment amount) and returns the modified color. Add the function to the top section of your shader, and apply it to the sampled color inside `fragmentMain`.
 
-> **Note**: The shader code in that blog post is GLSL (WebGL 1) code. You'll need to translate the code to WGSL. The main differences are:<br />- types are written differently: `vec3` becomes `vec3f`, `float` becomes `f32`<br />- variables are declared with `let` (constant) or `var` (modifiable) instead of a type: `float x = 1.0;` becomes `let x = 1.0;`<br />- functions are written as `fn adjustBrightness(color: vec3f, value: f32) -> vec3f { ... }`<br />- `gl_FragColor = ...` is replaced by `return ...`<br />- `texture2D(u_map, v_uv)` is replaced by `textureSample(image, imageSampler, uv)`<br />- you can't assign to multiple components at once: `color.rgb = ...` is not allowed. Build a new vector instead: `color = vec4f(adjustBrightness(color.rgb, value), color.a);`<br /><br />A more complete overview of the differences is in the [WGSL cheat sheet](#wgsl-cheat-sheet-coming-from-glsl) at the bottom of this page.
+> **WGSL gotcha**: you can't assign to multiple components of a `var` at once: `sampleColor.rgb = ...` is not allowed. Build a new vector instead: `sampleColor = vec4f(adjustBrightness(sampleColor.rgb, 0.5), sampleColor.a);`
+
+### Brightness
+
+The simplest adjustment: add the same value to every channel. A value of -1 makes the image fully black, 0 leaves it unchanged, 1 makes it fully white.
+
+```wgsl
+fn adjustBrightness(color: vec3f, value: f32) -> vec3f {
+  return color + value;
+}
+```
+
+Call it on the sampled color in `fragmentMain`:
+
+```wgsl
+@fragment
+fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
+  var sampleColor = textureSample(image, imageSampler, uv);
+  sampleColor = vec4f(adjustBrightness(sampleColor.rgb, 0.5), sampleColor.a);
+  return sampleColor;
+}
+```
+
+### Contrast
+
+Contrast pushes each channel away from (or towards) middle gray. We scale the distance between the color and 0.5: a value of -1 collapses the image to flat gray, 0 leaves it unchanged, positive values make dark pixels darker and bright pixels brighter. The `clamp` keeps the result in the 0–1 range.
+
+```wgsl
+fn adjustContrast(color: vec3f, contrast: f32) -> vec3f {
+  let c = contrast + 1.0;
+  return clamp(0.5 + c * (color - 0.5), vec3f(0), vec3f(1));
+}
+```
+
+```wgsl
+@fragment
+fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
+  var sampleColor = textureSample(image, imageSampler, uv);
+  sampleColor = vec4f(adjustContrast(sampleColor.rgb, 0.5), sampleColor.a);
+  return sampleColor;
+}
+```
+
+### Channel flip
+
+You can access the components of a vector in any order you like — this is called **swizzling**: `sampleColor.rgb` gives you the color as-is, `sampleColor.bgr` gives you the same color with the red and blue channels swapped. By mixing between the two, you can fade between the original and the flipped colors — no helper function needed. With `value` 1 you get the original image, with 0 the flipped one:
+
+```wgsl
+@fragment
+fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
+  var sampleColor = textureSample(image, imageSampler, uv);
+  let value = 0.0; // 1.0 = original colors, 0.0 = red and blue swapped
+  sampleColor = vec4f(sampleColor.rgb * value + sampleColor.bgr * (1.0 - value), sampleColor.a);
+  return sampleColor;
+}
+```
+
+### Saturation & hue
+
+Saturation and hue can't be handled with simple per-channel math: they only make sense in a color space built around the color wheel. We convert the color from RGB to **HSL** — hue (the position on the color wheel), saturation (how intense the color is) and lightness — apply our adjustment there, and convert back to RGB:
+
+```wgsl
+struct HSL {
+  h: f32,
+  s: f32,
+  l: f32,
+};
+
+fn rgbToHsl(rgb: vec3f) -> HSL {
+  let cMin = min(min(rgb.r, rgb.b), rgb.g);
+  let cMax = max(max(rgb.r, rgb.b), rgb.g);
+  let delta = cMax - cMin;
+  let l = (cMax + cMin) / 2.0;
+  if (delta == 0.0) {
+    return HSL(0, 0, l);
+  }
+  var h = 0.0;
+  if (rgb.r == cMax) {
+    h = (rgb.g - rgb.b) / delta;
+  } else if (rgb.g == cMax) {
+    h = 2.0 + (rgb.b - rgb.r) / delta;
+  } else {
+    h = 4.0 + (rgb.r - rgb.g) / delta;
+  }
+  h = h / 6.0;
+  let s = delta / (1.0 - abs(2.0 * l - 1.0));
+  return HSL(h, s, l);
+}
+
+fn hslToRgb(hsl: HSL) -> vec3f {
+  let c = vec3f(fract(hsl.h), clamp(vec2f(hsl.s, hsl.l), vec2f(0), vec2f(1)));
+  let rgb = clamp(abs((c.x * 6.0 + vec3f(0.0, 4.0, 2.0)) % 6.0 - 3.0) - 1.0, vec3f(0), vec3f(1));
+  return c.z + c.y * (rgb - 0.5) * (1.0 - abs(2.0 * c.z - 1.0));
+}
+
+fn adjustHSL(color: vec3f, adjust: HSL) -> vec3f {
+  let hsl = rgbToHsl(color);
+  return hslToRgb(HSL(hsl.h + adjust.h, hsl.s + adjust.s, hsl.l + adjust.l));
+}
+```
+
+Adjusting the saturation is adding a value to the `s` component (-1 = grayscale, 0 = unchanged, positive = oversaturated):
+
+```wgsl
+@fragment
+fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
+  var sampleColor = textureSample(image, imageSampler, uv);
+  sampleColor = vec4f(adjustHSL(sampleColor.rgb, HSL(0.0, 0.5, 0.0)), sampleColor.a);
+  return sampleColor;
+}
+```
+
+Adjusting the hue is adding a value to the `h` component — this rotates every color around the color wheel. The hue wraps around, so a value of 0.5 gives you the complementary colors and 1.0 brings you back to the original image:
+
+```wgsl
+@fragment
+fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
+  var sampleColor = textureSample(image, imageSampler, uv);
+  sampleColor = vec4f(adjustHSL(sampleColor.rgb, HSL(0.5, 0.0, 0.0)), sampleColor.a);
+  return sampleColor;
+}
+```
+
+> The RGB ↔ HSL conversion functions come from the [WebGPU Image Adjustments lesson on webgpufundamentals.org](https://webgpufundamentals.org/webgpu/lessons/webgpu-image-adjustments.html). Treat them as utility code — you don't need to memorize them.
 
 ### Interactive colour correction
 
-Let's make the amount of brightness, contrast and / or saturation interactive. You can pass values to the shader by providing uniform values. In WebGPU, all uniforms of a shader are grouped in a struct, which is stored in a **uniform buffer**.
+Let's make the amount of brightness, contrast, saturation and / or hue interactive. You can pass values to the shader by providing uniform values. In WebGPU, all uniforms of a shader are grouped in a struct, which is stored in a **uniform buffer**.
 
 Define a uniforms struct in the top section of your shader, and bind it to `@binding(0)`:
 
@@ -285,11 +408,17 @@ You should end up with something like this:
 
 ![mouse move changes brightness](images/interactive-brightness.gif)
 
+You can check out our solutions for the different adjustments: [brightness](2d/03a-brightness.html), [contrast](2d/03b-contrast.html), [channel flip](2d/03c-flip.html), [saturation](2d/03d-saturation.html) and [hue](2d/03e-hue.html).
+
 ### Color Matrix
 
-Next up, we're going to be using color matrices as a more flexible way of modifying our target color. Each of our filters is currently a multiplication and / or addition of a vector with our original color. By using matrices, we can get rid of the separate formulas in our shader, and use a matrix input which will contain the multiplication and / or sum factors.
+Next up, we're going to be using color matrices as a more flexible way of modifying our target color. Adjustments such as brightness, contrast and exposure are **linear** operations: each of them is just a multiplication and / or addition of our original color:
 
-Continue [Tim Severien's post on colour correction](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) with the matrix manipulation part.
+```
+newColor = matrix * color + offset
+```
+
+By using matrices, we can get rid of the separate formulas in our shader, and use a matrix input which will contain the multiplication and / or sum factors. Even better: we can **combine** multiple adjustments into a single matrix and offset by multiplying the matrices and adding the offsets — the shader stays one line of math, no matter how many adjustments we stack.
 
 Build a simple slider ui, so you can modify brightness, contrast, exposure and saturation from your javascript code.
 
@@ -375,9 +504,16 @@ setUniform('offset', ...offset);
 device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
 ```
 
-> The blog post (and our slider code) fills the matrices row by row: the first 4 numbers are the first row of the matrix. A `mat4x4f` in WGSL is stored column by column, so we transpose the matrix before uploading it. Alternatively, you could keep the matrix as is, and multiply the other way around in the shader: `sampleColor * uniforms.matrix`.
+> Our slider code fills the matrices row by row: the first 4 numbers are the first row of the matrix. A `mat4x4f` in WGSL is stored column by column, so we transpose the matrix before uploading it. Alternatively, you could keep the matrix as is, and multiply the other way around in the shader: `sampleColor * uniforms.matrix`.
 
-Given the blog post, write the necessary event handlers on the sliders to modify the matrices and offsets. For example, the contrast matrix and offset logic would be:
+Each adjustment has its own matrix and offset "recipe". They follow directly from the formulas you used earlier — just read off which factors multiply the color and which values are added to it:
+
+- **brightness** *b*: identity matrix, offset `(b, b, b, 0)` — we're just adding a value to each channel.
+- **contrast** *c*: put `c` on the matrix diagonal, offset `((1 - c) / 2, (1 - c) / 2, (1 - c) / 2, 0)` — this is `0.5 + c * (color - 0.5)` rewritten as `c * color + (1 - c) / 2`.
+- **exposure** *e*: put `e` on the matrix diagonal, no offset — a plain multiplication of each channel.
+- **saturation** *s*: mix each channel toward the luminance gray of the pixel, using the [WCAG relative luminance weights](https://www.w3.org/TR/WCAG21/#dfn-relative-luminance) `(0.2126, 0.7152, 0.0722)` (see the worked example below).
+
+Write the necessary event handlers on the sliders to modify the matrices and offsets. For example, the contrast matrix and offset logic would be:
 
 ```javascript
 $contrast.addEventListener('input', e => {
@@ -395,17 +531,89 @@ $contrast.addEventListener('input', e => {
 });
 ```
 
+The saturation matrix is the trickiest one. For a saturation factor `s`, each output channel becomes a mix between the pixel's luminance (a weighted gray value) and the original channel:
+
+```javascript
+$saturation.addEventListener('input', e => {
+  // https://www.w3.org/TR/WCAG21/#dfn-relative-luminance
+  const lr = 0.2126;
+  const lg = 0.7152;
+  const lb = 0.0722;
+
+  const s = parseFloat($saturation.value);
+  const sr = (1 - s) * lr;
+  const sg = (1 - s) * lg;
+  const sb = (1 - s) * lb;
+
+  u_saturationMatrix[0] = sr + s;
+  u_saturationMatrix[1] = sg;
+  u_saturationMatrix[2] = sb;
+
+  u_saturationMatrix[4] = sr;
+  u_saturationMatrix[5] = sg + s;
+  u_saturationMatrix[6] = sb;
+
+  u_saturationMatrix[8] = sr;
+  u_saturationMatrix[9] = sg;
+  u_saturationMatrix[10] = sb + s;
+});
+```
+
+At `s = 1` this is the identity matrix (no change), at `s = 0` every channel becomes the same luminance value (grayscale).
+
+> **Note**: this is the *linear approximation* of saturation that color matrices (and libraries like PixiJS) use. Our HSL-based saturation from the [Saturation & hue section](#saturation--hue) can't be written as a matrix — converting to HSL and back is not a linear operation.
+
 You can [check out the solution](2d/04a-color-matrix.html) when you're stuck.
 
 ![sliders controlling the filters](images/color-matrices-sliders.gif)
 
 ### Effects
 
-Continue with [the post on colour corrections](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) and implement the effects part. The big difference is you'll be using precalculated matrices instead of having a separate effect matrix. And as before: the post's shader code is GLSL, so you'll need to translate it to WGSL (the [WGSL cheat sheet](#wgsl-cheat-sheet-coming-from-glsl) can help).
+Once you look at color adjustments as matrices, Instagram-style effects (sepia, noir, vintage, ...) turn out to be nothing more than **precalculated matrix + offset pairs**, plugged into the exact same shader. Instead of calculating the matrix values from a slider, you use a fixed set of numbers per effect.
 
-You can find a couple of [effect matrices in the PixiJS ColorMatrixFilter class](https://github.com/pixijs/pixijs/blob/main/src/filters/defaults/color-matrix/ColorMatrixFilter.ts).
+You can find a couple of [effect matrices in the PixiJS ColorMatrixFilter class](https://github.com/pixijs/pixijs/blob/main/src/filters/defaults/color-matrix/ColorMatrixFilter.ts). Note that PixiJS stores each effect as a 4×5 matrix, row by row: the first 4 numbers of each row are the multiplication factors (a row of our `mat4`), the 5th number is the added value (a component of our `offset` vector).
 
-Take a look at [04b-filter.html](2d/04b-filter.html): it has a dropdown to pick an effect and a "Save" button which logs the final ("baked") matrix and offset to the console. [04c-filter-baked.html](2d/04c-filter-baked.html) uses such a baked matrix directly, without the sliders. Note that this baked matrix was logged *after* the transpose, so we upload it as-is.
+Let's split one of them — sepia — step by step, starting from your color matrix solution ([04a-color-matrix.html](2d/04a-color-matrix.html)):
+
+1. Remove the slider parts: the `<input type="range">` elements from the html, the four `u_...Matrix` / `u_...Offset` pairs with their `input` handlers, and the matrix / offset composition at the top of `drawScene()`. Keep the shader, the uniform layout and the `setUniform` / `writeBuffer` calls — they stay exactly the same.
+
+2. Copy the sepia matrix from the PixiJS class into your javascript as a plain array. Write it as 4 rows of 5 numbers, so you can see the structure:
+
+   ```javascript
+   const sepia = [
+     0.394, 0.769, 0.189, 0.000, 0.000,
+     0.349, 0.686, 0.168, 0.000, 0.000,
+     0.272, 0.534, 0.131, 0.000, 0.000,
+     0.000, 0.000, 0.000, 1.000, 0.000,
+   ];
+   ```
+
+3. Split it into our two uniforms: the first 4 numbers of each row go into the matrix, each row's 5th number goes into the offset. Replace your `matrix` and `offset` definitions:
+
+   ```javascript
+   const matrix = mat4.fromValues(
+     sepia[0], sepia[1], sepia[2], sepia[3],
+     sepia[5], sepia[6], sepia[7], sepia[8],
+     sepia[10], sepia[11], sepia[12], sepia[13],
+     sepia[15], sepia[16], sepia[17], sepia[18],
+   );
+   const offset = vec4.fromValues(sepia[4], sepia[9], sepia[14], sepia[19]);
+
+   // the matrix is built row by row, but WGSL expects it column by column
+   mat4.transpose(matrix, matrix);
+   ```
+
+   As before, we transpose because we filled the matrix row by row. The effect doesn't change while the app runs, so we can do this once at startup instead of on every frame.
+
+4. `drawScene()` now only needs to upload the values:
+
+   ```javascript
+   setUniform('matrix', ...matrix);
+   setUniform('offset', ...offset);
+   device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+   ```
+
+You should see the image in sepia tones. You can [check out the solution](2d/04b-effect.html) when you're stuck. Try swapping in one of the other PixiJS effects (mono, noir, ...) — only the numbers change.
 
 As a final exercise, we'll animate between our regular colors and the effect colors:
 
@@ -494,6 +702,12 @@ Don't forget to modify the code where you're passing the effectFactor into the s
 ```javascript
 setUniform('effectFactor', properties.effectFactor);
 ```
+
+You can [check out the final solution](2d/04c-effect-hover.html) when you're stuck.
+
+### Going further: colour lookup tables (LUTs)
+
+There's a third way to do colour adjustments, next to formulas and matrices: baking the transformation into a texture, called a lookup table (LUT). The [1D LUT lesson on webgpufundamentals.org](https://webgpufundamentals.org/webgpu/lessons/webgpu-1dlut.html) maps the luminance of each pixel through a gradient texture, giving you duotone and gradient-map effects. The [3D LUT lesson](https://webgpufundamentals.org/webgpu/lessons/webgpu-3dlut.html) goes all the way: a colour cube texture that can combine *all* of the adjustments and effects from this chapter into a single texture lookup — you can even load colour grades made in Photoshop or industry-standard Adobe `.cube` files. Recommended reading once you're comfortable with the material above.
 
 ## 2D Displacement maps
 

@@ -56,8 +56,9 @@
       @group(0) @binding(1) var imageSampler: sampler;
       @group(0) @binding(2) var image: texture_2d<f32>;
 
-      fn adjustContrast(color: vec3f, value: f32) -> vec3f {
-        return 0.5 + (1.0 + value) * (color - 0.5);
+      fn adjustContrast(color: vec3f, contrast: f32) -> vec3f {
+        let c = contrast + 1.0;
+        return clamp(0.5 + c * (color - 0.5), vec3f(0), vec3f(1));
       }
 
       @fragment
