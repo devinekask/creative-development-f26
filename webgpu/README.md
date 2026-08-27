@@ -208,7 +208,7 @@ You should see an image with the red channel boosted to max:
 
 ![photo with red boosted to max](images/red-image.jpg)
 
-Go through the post [Colour correction with webgl](https://timseverien.com/posts/2020-06-19-colour-correction-with-webgl/) until you reach Colour Matrices. We will cover that a bit later.
+Go through the post [Colour correction with webgl](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) until you reach Colour Matrices. We will cover that a bit later.
 
 > **Note**: The shader code in that blog post is GLSL (WebGL 1) code. You'll need to translate the code to WGSL. The main differences are:<br />- types are written differently: `vec3` becomes `vec3f`, `float` becomes `f32`<br />- variables are declared with `let` (constant) or `var` (modifiable) instead of a type: `float x = 1.0;` becomes `let x = 1.0;`<br />- functions are written as `fn adjustBrightness(color: vec3f, value: f32) -> vec3f { ... }`<br />- `gl_FragColor = ...` is replaced by `return ...`<br />- `texture2D(u_map, v_uv)` is replaced by `textureSample(image, imageSampler, uv)`<br />- you can't assign to multiple components at once: `color.rgb = ...` is not allowed. Build a new vector instead: `color = vec4f(adjustBrightness(color.rgb, value), color.a);`
 
@@ -291,7 +291,7 @@ You should end up with something like this:
 
 Next up, we're going to be using color matrices as a more flexible way of modifying our target color. Each of our filters is currently a multiplication and / or addition of a vector with our original color. By using matrices, we can get rid of the separate formulas in our shader, and use a matrix input which will contain the multiplication and / or sum factors.
 
-Continue [Tim Severien's post on colour correction](https://timseverien.com/posts/2020-06-19-colour-correction-with-webgl/) with the matrix manipulation part.
+Continue [Tim Severien's post on colour correction](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) with the matrix manipulation part.
 
 Build a simple slider ui, so you can modify brightness, contrast, exposure and saturation from your javascript code.
 
@@ -404,7 +404,7 @@ You can [check out the solution](2d/04a-color-matrix.html) when you're stuck.
 
 ### Effects
 
-Continue with [the post on colour corrections](https://timseverien.com/posts/2020-06-19-colour-correction-with-webgl/) and implement the effects part. The big difference is you'll be using precalculated matrices instead of having a separate effect matrix and that that respective post was written for WebGL 1.0.
+Continue with [the post on colour corrections](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) and implement the effects part. The big difference is you'll be using precalculated matrices instead of having a separate effect matrix and that that respective post was written for WebGL 1.0.
 
 You can find a couple of [effect matrices in the PixiJS ColorMatrixFilter class](https://github.com/pixijs/pixijs/blob/main/src/filters/defaults/color-matrix/ColorMatrixFilter.ts).
 
