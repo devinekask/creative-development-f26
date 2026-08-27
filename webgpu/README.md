@@ -1,12 +1,10 @@
 # WebGPU
 
-WebGPU is the successor of WebGL: a modern API to use the raw power of your GPU from javascript. Just like WebGL, it's mostly used to render pixels to an HTML canvas. On top of that, it gives you access to compute shaders: running general purpose calculations on the GPU, without drawing anything.
+WebGPU is the successor of WebGL: a modern API to use the raw power of your GPU from javascript. It's mostly used to render pixels to an HTML canvas. On top of that, it gives you access to compute shaders: running general purpose calculations on the GPU, without drawing anything.
 
-The shader language of WebGPU is called **WGSL** (WebGPU Shading Language). It looks a bit different from the GLSL you might know from WebGL, but the concepts (vertex shaders, fragment shaders, uniforms, textures) are the same.
+The shader language of WebGPU is called **WGSL** (WebGPU Shading Language). It's a different language than GLSL (the shader language of WebGL, and of sites such as [Shadertoy](https://shadertoy.com)), but the concepts (vertex shaders, fragment shaders, uniforms, textures) are the same.
 
 > ℹ️ This chapter was written in the fall of 2026. WebGPU is available in Chrome & Edge (since version 113), in Safari 26 (macOS Tahoe, iOS 26 & iPadOS 26) and in Firefox 141+ on Windows (on other platforms Firefox still hides it behind a flag). **Use Chrome for this chapter**, its error messages are the most helpful.
-
-If you've done the WebGL chapter before, [WebGPU from WebGL](https://webgpufundamentals.org/webgpu/lessons/webgpu-from-webgl.html) on WebGPU Fundamentals gives you a quick overview of what's different.
 
 # WebGPU 2D - Fragment Shaders
 
@@ -56,7 +54,7 @@ const shaderModule = device.createShaderModule({ code: `
 `});
 ```
 
-This block compiles a WGSL string to a **shader module**. In WebGL we had to compile a vertex shader and a fragment shader separately and link them into a program. In WebGPU both shaders live in the same piece of code. Let's look at the vertex shader part first:
+This block compiles a WGSL string to a **shader module**. Both the vertex shader and the fragment shader live in the same piece of code. Let's look at the vertex shader part first:
 
 ```wgsl
 struct VertexOutput {
@@ -86,9 +84,9 @@ fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 }
 ```
 
-- `@vertex fn vertexMain`: the function that runs for every vertex. In WebGL, this was `main()` in the vertex shader.
+- `@vertex fn vertexMain`: the function that runs for every vertex.
 - `@builtin(vertex_index) vertexIndex: u32`: WebGPU tells us which vertex we're processing (0, 1, 2, ...). Instead of uploading the vertex positions in a buffer, we've hardcoded the 6 corner points of 2 triangles in the shader and pick one using this index. A triangle consists of 3 points. Two times 3 is 6. If we line up the triangles we draw a rectangle.
-- `struct VertexOutput`: the values a vertex shader passes on to the fragment shader. In WebGL these were `out` variables, in WGSL you return a struct.
+- `struct VertexOutput`: the values a vertex shader passes on to the fragment shader: you return them as a struct.
 - `@builtin(position)`: the vertex position in [clip space](https://webgpufundamentals.org/webgpu/lessons/webgpu-fundamentals.html#a-clip-space) as a 4d coordinate (x, y, z, w). As we will be handling 2D logic at first, z is 0 and w is 1.
 - `@location(0) uv`: an extra value we pass to the fragment shader: where to sample a color from the texture, in uv-coordinate space (values between 0 and 1). Note that the uv origin is at the top-left of the image, while clip space has its origin in the center with y pointing up. That's why we're doing a small calculation instead of just copying the position.
 
@@ -105,10 +103,10 @@ fn fragmentMain(@location(0) uv: vec2f) -> @location(0) vec4f {
 This is the fragment shader part. A fragment shader is used to determine the target pixel color.
 
 - `var image: texture_2d<f32>`: the pixels to use as input. In this chapter we will be using images (or videos) as input.
-- `var imageSampler: sampler`: **how** to read the texture: which filtering to use, what to do outside of the 0-1 range, ... In WebGL the sampler settings were part of the texture, in WebGPU they're separate.
+- `var imageSampler: sampler`: **how** to read the texture: which filtering to use, what to do outside of the 0-1 range, ... The texture holds the pixels, the sampler is a separate object describing how to read them.
 - `@group(0) @binding(n)`: every external resource (textures, samplers, uniforms) gets a number. We'll use these numbers in our javascript to connect the actual data.
 - `@location(0) uv: vec2f`: the value we got from the vertex shader.
-- `-> @location(0) vec4f`: the function returns the target pixel color as a 4d vector (r, g, b, a). In WebGL this was `out vec4 outColor`.
+- `-> @location(0) vec4f`: the function returns the target pixel color as a 4d vector (r, g, b, a).
 - `textureSample(...)`: In this example we're just taking the color of the pixel in the texture.
 
 ```javascript
@@ -119,7 +117,7 @@ const pipeline = device.createRenderPipeline({
 });
 ```
 
-A **render pipeline** combines the two shaders with some extra settings, such as the pixel format we're drawing to. This is the closest thing to a WebGL program. `layout: 'auto'` tells WebGPU to figure out the bindings (`@group` / `@binding`) from the shader code itself.
+A **render pipeline** combines the two shaders with some extra settings, such as the pixel format we're drawing to. `layout: 'auto'` tells WebGPU to figure out the bindings (`@group` / `@binding`) from the shader code itself.
 
 ```javascript
 const sampler = device.createSampler({
@@ -156,7 +154,7 @@ bindGroup = device.createBindGroup({
 });
 ```
 
-A **bind group** connects our actual resources to the `@binding` numbers in the shader. This replaces the whole `gl.activeTexture` / `gl.bindTexture` / `gl.uniform1i` dance from WebGL.
+A **bind group** connects our actual resources to the `@binding` numbers in the shader.
 
 ```javascript
 const drawScene = () => {
@@ -210,7 +208,7 @@ You should see an image with the red channel boosted to max:
 
 Go through the post [Colour correction with webgl](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) until you reach Colour Matrices. We will cover that a bit later.
 
-> **Note**: The shader code in that blog post is GLSL (WebGL 1) code. You'll need to translate the code to WGSL. The main differences are:<br />- types are written differently: `vec3` becomes `vec3f`, `float` becomes `f32`<br />- variables are declared with `let` (constant) or `var` (modifiable) instead of a type: `float x = 1.0;` becomes `let x = 1.0;`<br />- functions are written as `fn adjustBrightness(color: vec3f, value: f32) -> vec3f { ... }`<br />- `gl_FragColor = ...` is replaced by `return ...`<br />- `texture2D(u_map, v_uv)` is replaced by `textureSample(image, imageSampler, uv)`<br />- you can't assign to multiple components at once: `color.rgb = ...` is not allowed. Build a new vector instead: `color = vec4f(adjustBrightness(color.rgb, value), color.a);`
+> **Note**: The shader code in that blog post is GLSL (WebGL 1) code. You'll need to translate the code to WGSL. The main differences are:<br />- types are written differently: `vec3` becomes `vec3f`, `float` becomes `f32`<br />- variables are declared with `let` (constant) or `var` (modifiable) instead of a type: `float x = 1.0;` becomes `let x = 1.0;`<br />- functions are written as `fn adjustBrightness(color: vec3f, value: f32) -> vec3f { ... }`<br />- `gl_FragColor = ...` is replaced by `return ...`<br />- `texture2D(u_map, v_uv)` is replaced by `textureSample(image, imageSampler, uv)`<br />- you can't assign to multiple components at once: `color.rgb = ...` is not allowed. Build a new vector instead: `color = vec4f(adjustBrightness(color.rgb, value), color.a);`<br /><br />A more complete overview of the differences is in the [WGSL cheat sheet](#wgsl-cheat-sheet-coming-from-glsl) at the bottom of this page.
 
 ### Interactive colour correction
 
@@ -371,7 +369,6 @@ vec4.add(offset, offset, u_exposureOffset);
 vec4.add(offset, offset, u_saturationOffset);
 
 // our matrices are built row by row, but WGSL expects them column by column
-// (in WebGL, this was the "transpose" flag of uniformMatrix4fv)
 mat4.transpose(matrix, matrix);
 setUniform('matrix', ...matrix);
 setUniform('offset', ...offset);
@@ -404,7 +401,7 @@ You can [check out the solution](2d/04a-color-matrix.html) when you're stuck.
 
 ### Effects
 
-Continue with [the post on colour corrections](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) and implement the effects part. The big difference is you'll be using precalculated matrices instead of having a separate effect matrix and that that respective post was written for WebGL 1.0.
+Continue with [the post on colour corrections](https://tsev.dev/posts/2020-06-19-colour-correction-with-webgl/) and implement the effects part. The big difference is you'll be using precalculated matrices instead of having a separate effect matrix. And as before: the post's shader code is GLSL, so you'll need to translate it to WGSL (the [WGSL cheat sheet](#wgsl-cheat-sheet-coming-from-glsl) can help).
 
 You can find a couple of [effect matrices in the PixiJS ColorMatrixFilter class](https://github.com/pixijs/pixijs/blob/main/src/filters/defaults/color-matrix/ColorMatrixFilter.ts).
 
@@ -523,11 +520,11 @@ In your javascript, you'll load the second image, create a texture from it and a
 
 Applying a black and white displacement map such as the one below:
 
-![black and white stripes](images/webgl-displacement.png)
+![black and white stripes](images/displacement.png)
 
 Would result in the effect below:
 
-![effect of displacement map](images/webgl-displacement-result.jpg)
+![effect of displacement map](images/displacement-result.jpg)
 
 Things get even more interesting when you start animating the displacement factor from the shader. You can animate the uniform value on hover, like we did in the previous project:
 
@@ -538,7 +535,7 @@ canvas.addEventListener('mouseout', () => gsap.to(properties, { duration: 1, eas
 
 On hover, you'll get the following effect:
 
-![animated displacement effect](images/webgl-displacement-hover.gif)
+![animated displacement effect](images/displacement-hover.gif)
 
 Try implementing this displacement effect by yourself. There's a couple of displacement maps for you to test in the [2d/images/displacement](2d/images/displacement) folder.
 
@@ -1157,6 +1154,35 @@ Start from the basic image example and translate the shadertoy code to WGSL, ste
 5. There is no preprocessor in WGSL: get rid of the `#define PROCEDURAL 1`, `#if`, `#else` and `#endif` lines and only keep the procedural branch.
 6. Math functions such as `sin`, `cos`, `smoothstep` and `mix` exist in WGSL with the same name. Multiplying a vector with a number (`0.5000 * cos(...)`) works as well.
 
+(A more complete overview of the differences is in the [WGSL cheat sheet](#wgsl-cheat-sheet-coming-from-glsl) at the bottom of this page.)
+
+To see the rules in action, here's how the first lines of the Shadertoy code translate:
+
+```glsl
+// GLSL (Shadertoy)
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+    vec2 uv = fragCoord / iResolution.xy;
+
+    float freq = 3.0*sin(0.5*iTime);
+    ...
+```
+
+becomes:
+
+```wgsl
+// WGSL
+fn mainImage(fragCoord: vec2f) -> vec4f {
+  let uv = fragCoord / iResolution.xy;
+
+  let freq = 3.0 * sin(0.5 * iTime);
+  // ...
+```
+
+- Rule 3: the `out vec4 fragColor` parameter is gone. The function returns a `vec4f` instead, so at the bottom of the function, `fragColor = ...;` will become `return ...;`.
+- Rules 1 & 2: `vec2 uv = ...` and `float freq = ...` become `let uv = ...` and `let freq = ...` (WGSL infers the types).
+- Later in the shader, `mask` gets modified after its declaration (`mask *= ...`), so it needs to be a `var` instead of a `let`.
+
 A Shadertoy shader receives a bunch of extra inputs, which are not listed in the code. If you expand the Shader Inputs section, you'll see an overview of these inputs:
 
 ![shadertoy inputs](images/shadertoy-02.png)
@@ -1198,11 +1224,13 @@ Try giving them the correct values from your javascript code. We've used similar
 
 ### Fixing the final issues
 
-If you did the WebGL version of this exercise, you might expect an upside down image at this point. In WebGPU, the pixel coordinate of `@builtin(position)` starts at the top-left of the canvas (in WebGL & Shadertoy, it starts at the bottom-left). As our texture coordinates start at the top-left as well, everything lines up and there's nothing to flip 🎉.
+You might expect an upside down image at this point: on Shadertoy (and in other GLSL environments), the pixel coordinate origin is at the *bottom-left*. In WebGPU, the pixel coordinate of `@builtin(position)` starts at the *top-left* of the canvas. As our texture coordinates start at the top-left as well, everything lines up and there's nothing to flip 🎉.
 
 Don't like the stripe-repeats at the edges? You can implement the `smoothstep` masking approach from earlier!
 
 ![final result](images/shadertoy-04.jpg)
+
+> ℹ️ Now that you've done a conversion by hand: an LLM (Claude, ChatGPT, Copilot, ...) can do a decent first-pass GLSL → WGSL conversion for you. Paste the result into your project and fix the remaining compile errors using the [WGSL cheat sheet](#wgsl-cheat-sheet-coming-from-glsl) - Chrome's WGSL error messages tell you exactly which line to look at. Do make sure you understand what the converted code does; you'll want to tweak it to make it your own.
 
 # Vertex shaders
 
@@ -1408,6 +1436,11 @@ Some things to try:
 | `mix`, `step`, `smoothstep`, `length`, `dot`, `abs`, `max`, `sin`, `cos`, `clamp`, `fract`, `pow` | same names |
 
 The full list of builtin functions is in the [WGSL function reference](https://webgpufundamentals.org/webgpu/lessons/webgpu-wgsl-function-reference.html).
+
+More GLSL → WGSL references:
+
+- [WebGPU from WebGL](https://webgpufundamentals.org/webgpu/lessons/webgpu-from-webgl.html) - side-by-side comparison of GLSL and WGSL shaders (and of both javascript APIs)
+- [Tour of WGSL](https://google.github.io/tour-of-wgsl/) - an interactive tour of the WGSL language
 
 # Where to go from here
 

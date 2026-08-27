@@ -10,9 +10,13 @@ The following topics are covered for all students:
 
 Building native apps with React.
 
-### [Topic 2 - WebGL2](webgl)
+### [Topic 2 - WebGPU](webgpu)
 
-2D WebGL fragment shaders & 3D using ThreeJS.
+2D WebGPU fragment shaders
+
+### [Topic 3 - Three.js](threejs)
+
+3D Web Interaction with Three.js
 
 ### Capita Selecta
 

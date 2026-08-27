@@ -325,7 +325,6 @@
       vec4.add(offset, offset, u_saturationOffset);
       vec4.add(offset, offset, filterOffset);
       // our matrices are built row by row, but WGSL expects them column by column
-      // (in WebGL, this was the "transpose" flag of uniformMatrix4fv)
       mat4.transpose(matrix, matrix);
       setUniform('matrix', ...matrix);
       setUniform('offset', ...offset);
