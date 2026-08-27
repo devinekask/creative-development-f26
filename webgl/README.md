@@ -1856,5 +1856,4 @@ There's one more tutorial on the learning platform, which teaches you how to bak
 - http://math.hws.edu/graphicsbook/index.html
 - https://github.com/sjfricke/awesome-webgl
 - https://thebookofshaders.com/
-- https://www.august.com.au/blog/animating-scenes-with-webgl-three-js
-- https://tympanus.net/codrops/2017/05/09/infinite-tubes-with-three-js/
+- https://threejsresources.com
