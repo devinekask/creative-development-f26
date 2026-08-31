@@ -1204,17 +1204,14 @@ You're not just limited to static images as textures: you can use videos as well
 
 Start off from [the ripple effect solution](2d/06d-ripple-final.html).
 
-Add a video tag below the canvas, you can [use our showreel](2d/videos/showreel-2023.mp4) as a source:
-
-```html
-<video id="video" src="videos/showreel-2023.mp4"></video>
-```
-
-Get a javascript reference to this video tag, similar to how we've referenced the canvas tag:
+We won't be adding a video tag to the page: the WebGPU canvas will be our video display, so there's no need to show the video element itself. Instead, create a video element in javascript, purely as a source of frames. You can [use our showreel](2d/videos/showreel-2023.mp4) as a source:
 
 ```javascript
-const $video = document.querySelector('#video');
+const $video = document.createElement('video');
+$video.src = "videos/showreel-2023.mp4";
 ```
+
+> 💡 Keeping the video element out of the document also sidesteps a nasty real-world issue: browsers pause muted videos that scroll out of view (or are hidden) to save power. If we'd feed our texture from a video tag on the page, the canvas would freeze as soon as that tag scrolls out of the viewport. A video element that was never added to the page has no on-screen position, so the browser keeps it playing.
 
 Get rid of the `loadImage` call and `createTextureFromImage`. Instead, create a texture with the size of the video, and copy the current video frame into it. As we'll need to copy frames more than once later on, we put the copy in a separate function:
 
@@ -1248,7 +1245,7 @@ This has to do with the fact that the video has not loaded yet when copying it t
 
 We'll need to wait for [the canplay event](https://developer.mozilla.org/en-US/docs/Web/API/HTMLMediaElement/canplay_event) before sending it over to our shader.
 
-Wrap the texture creation & the rest of the init function inside of the canplay handler. Remove the src attribute from the video tag, and add it using javascript instead. This way, the video will start loading as soon as the page is loaded:
+Wrap the texture creation & the rest of the init function inside of the canplay handler. Move the src assignment to the end of the init function: first start listening, then trigger the load:
 
 ```javascript
 $video.addEventListener('canplay', () => {
@@ -1282,17 +1279,18 @@ You'll see `can play` logged, but you might still see the same error:
 
 `canplay` tells us the browser *could* start playing, but that doesn't mean a decoded frame is already available for the GPU.
 
-There's another issue lurking in the code: `$video.width` and `$video.height` are the size of the html element (0, as we haven't set a width or height attribute), not the size of the video. You can get the native size of the video through the `.videoWidth` and `.videoHeight` properties. Use those when setting the canvas size instead of just `.width` and `.height`:
+There's another issue lurking in the code: `$video.width` and `$video.height` are the display size of the video element (0 by default), not the size of the video itself. You can get the native size of the video through the `.videoWidth` and `.videoHeight` properties. Use those when setting the canvas size instead of just `.width` and `.height`:
 
 ```javascript
 canvas.width = $video.videoWidth;
 canvas.height = $video.videoHeight;
 ```
 
-At time of writing, Chrome still throws the same error at this point. Adding a `preload` attribute to our video tag fixes the issue:
+At time of writing, Chrome still throws the same error at this point. Setting the `preload` property on our video element fixes the issue:
 
-```html
-<video id="video" preload="auto"></video>
+```javascript
+const $video = document.createElement('video');
+$video.preload = 'auto';
 ```
 
 You should see the first frame of the video in all browsers.
@@ -1310,19 +1308,24 @@ When trying this approach, you'll get an error, indicating the user needs to int
 
 > DOMException: play() failed because the user didn't interact with the document first
 
-We could solve this by adding a dedicated play button on the page and starting playback when the user clicks that button. However: if you don't need sound to be active, you still can autoplay videos!
+We could solve this by adding a dedicated play button on the page and starting playback when the user clicks that button. However: if you don't need sound to be active, browsers do allow playing muted videos without user interaction!
 
-Get rid of that `.play()` call first, and add the html attributes `autoplay`, `muted` and `playsinline` to your video tag:
+Keep the `play()` call, and set the `muted` and `playsInline` properties when creating the video element (`playsInline` prevents iOS from opening the video fullscreen):
 
-```html
-<video id="video" preload="auto" autoplay playsinline muted></video>
+```javascript
+const $video = document.createElement('video');
+$video.preload = 'auto';
+$video.muted = true;
+$video.playsInline = true;
 ```
 
-Reload the browser, and you should see the video playing. The canvas is still frozen on the first frame though.
+Reload the browser. It looks like nothing changed: the canvas still shows the frozen first frame. But the video *is* playing — we're just still showing the single frame we uploaded in the `canplay` handler.
+
+> 💡 Since the video element isn't on the page, you can't watch the raw video itself. If you ever want to eyeball it while debugging, temporarily add it to the document with `document.body.append($video)`.
 
 ### Updating the video texture
 
-When copying a video frame to a texture, it passes that frame as a static collection of pixel values, no matter if it's coming from an image or a video tag. You'll need to update the texture during our requestAnimationFrame loop.
+When copying a video frame to a texture, it passes that frame as a static collection of pixel values, no matter if it's coming from an image or a video element. You'll need to update the texture during our requestAnimationFrame loop.
 
 Add the upload call before recording the render pass in the drawScene method:
 
@@ -1359,12 +1362,79 @@ The main entrypoint of a shadertoy shader is a function called `mainImage` which
 - `out vec4 fragColor` - assigning this variable will set the output color
 - `in vec2 fragCoord` - this variable contains the x and y coordinate of the pixel
 
-Start from the basic image example and translate the shadertoy code to WGSL, step by step. These are the translation rules you'll need:
+Start from the [basic image example](2d/02-image.html). We'll get this shader working in two big steps: first we set up the **inputs** the shader needs (the uniforms), then we translate the `mainImage` code itself.
+
+### Setting up the shader inputs
+
+A Shadertoy shader receives a bunch of extra inputs, which are not listed in the code. If you expand the Shader Inputs section, you'll see an overview of these inputs:
+
+![shadertoy inputs](images/shadertoy-02.png)
+
+Look at the shadertoy code itself, and identify which inputs are actually being used. For this shader, that's `iResolution`, `iTime` and the `iChannel0` texture. Declare the first two in a Uniforms struct, and rename the `image` texture and `imageSampler` in your shader to `iChannel0` and `iSampler`, so the code can read the same as on Shadertoy:
+
+```wgsl
+struct Uniforms {
+  iResolution: vec2f,
+  iTime: f32,
+};
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var iSampler: sampler;
+@group(0) @binding(2) var iChannel0: texture_2d<f32>;
+```
+
+Don't forget to update the `textureSample(...)` call in `fragmentMain` to the new names, otherwise the shader won't compile.
+
+Next up: the `mainImage` function itself. WGSL has no `out` parameters, so our version of `mainImage` will *return* the color instead of assigning it to `fragColor`. Inside of `mainImage`, you can create local copies of the uniform values, so the code reads the same as on Shadertoy. For now, it just samples the texture:
+
+```wgsl
+fn mainImage(fragCoord: vec2f) -> vec4f {
+  let iResolution = uniforms.iResolution;
+  let iTime = uniforms.iTime;
+
+  let uv = fragCoord / iResolution.xy;
+  return textureSample(iChannel0, iSampler, uv); // temporary, until we translate the real code
+}
+```
+
+Our fragment shader isn't calling this `mainImage` function yet. Change the `fragmentMain()` function, so it calls the `mainImage()` function. The pixel coordinate is available as `@builtin(position)`:
+
+```wgsl
+@fragment
+fn fragmentMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
+  return mainImage(fragCoord.xy);
+}
+```
+
+The shader now expects a uniform buffer at `@binding(0)`. Set it up in your javascript code, and add it to your bind group - we've used similar inputs in previous exercises 😁 There's one thing to watch out for in the offsets: a `vec2f` takes 2 floats, so `iTime` lives at offset 2:
+
+```javascript
+// the offsets (in floats) of each uniform value, must match the Uniforms struct in the shader
+// a vec2f takes 2 floats, so iTime lives at offset 2
+const uniforms = { iResolution: 0, iTime: 2 };
+const uniformValues = new Float32Array(4);
+// ...
+```
+
+Set the uniform values in the draw loop:
+
+```javascript
+const drawScene = (time = 0) => {
+  setUniform('iResolution', canvas.width, canvas.height);
+  setUniform('iTime', time / 1000);
+  device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+  // ...
+```
+
+Run the page: you should see the unchanged image. Nothing spectacular yet - but it's now rendered through `mainImage`, with working `iResolution`, `iTime` and `iChannel0` inputs. Time for the real translation.
+
+### Translating the mainImage code
+
+Now translate the shadertoy code to WGSL, step by step, replacing the temporary `textureSample` return in your `mainImage`. These are the translation rules you'll need:
 
 1. Types: `vec2` → `vec2f`, `vec3` → `vec3f`, `vec4` → `vec4f`, `float` → `f32`.
 2. Variables: `float freq = ...;` → `let freq = ...;`. If the variable gets modified afterwards (like `mask *= ...`), use `var` instead of `let`.
-3. Functions: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` → `fn mainImage(fragCoord: vec2f) -> vec4f`. WGSL has no `out` parameters: return the color instead of assigning it to `fragColor`.
-4. `texture(iChannel0, uv)` → `textureSample(iChannel0, iSampler, uv)`. Rename the `image` texture and `imageSampler` in your shader to `iChannel0` and `iSampler`.
+3. Functions: `void mainImage(out vec4 fragColor, in vec2 fragCoord)` → `fn mainImage(fragCoord: vec2f) -> vec4f`. WGSL has no `out` parameters: return the color instead of assigning it to `fragColor` (you already wrote this signature in the previous step).
+4. `texture(iChannel0, uv)` → `textureSample(iChannel0, iSampler, uv)` - in WGSL the sampler is a separate parameter.
 5. There is no preprocessor in WGSL: get rid of the `#define PROCEDURAL 1`, `#if`, `#else` and `#endif` lines and only keep the procedural branch.
 6. Math functions such as `sin`, `cos`, `smoothstep` and `mix` exist in WGSL with the same name. Multiplying a vector with a number (`0.5000 * cos(...)`) works as well.
 
@@ -1397,44 +1467,7 @@ fn mainImage(fragCoord: vec2f) -> vec4f {
 - Rules 1 & 2: `vec2 uv = ...` and `float freq = ...` become `let uv = ...` and `let freq = ...` (WGSL infers the types).
 - Later in the shader, `mask` gets modified after its declaration (`mask *= ...`), so it needs to be a `var` instead of a `let`.
 
-A Shadertoy shader receives a bunch of extra inputs, which are not listed in the code. If you expand the Shader Inputs section, you'll see an overview of these inputs:
-
-![shadertoy inputs](images/shadertoy-02.png)
-
-Look at the shadertoy code itself, and declare the necessary inputs (so: only the ones you're seeing being used) in your Uniforms struct. Inside of `mainImage`, you can create local copies so the code reads the same as on Shadertoy:
-
-```wgsl
-fn mainImage(fragCoord: vec2f) -> vec4f {
-  let iResolution = uniforms.iResolution;
-  let iTime = uniforms.iTime;
-
-  // the translated shadertoy code
-}
-```
-
-The code should compile again, but no effect is applied. We're not calling the mainImage function yet, our fragment shader is still a simple sampler of our texture.
-
-Change the `fragmentMain()` function, so it calls the `mainImage()` function. The pixel coordinate is available as `@builtin(position)`:
-
-```wgsl
-@fragment
-fn fragmentMain(@builtin(position) fragCoord: vec4f) -> @location(0) vec4f {
-  return mainImage(fragCoord.xy);
-}
-```
-
-### Providing the correct uniform values
-
-You've added 2 uniforms for this particular shader:
-
-```wgsl
-struct Uniforms {
-  iResolution: vec2f,
-  iTime: f32,
-};
-```
-
-Try giving them the correct values from your javascript code. We've used similar inputs in previous exercises 😁
+Note that the `uv` line is already in your skeleton from the previous step. Translate the rest of the shader the same way. You can [check out the solution](2d/11-shadertoy.html) when you're stuck.
 
 ### Fixing the final issues
 
