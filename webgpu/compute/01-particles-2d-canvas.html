@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Canvas 2D</title>
+  <style>
+    #fps {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      padding: 4px 8px;
+      font: 14px monospace;
+      color: white;
+      background: rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+  <div id="fps"></div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.15.0/gsap.min.js"></script>
+
+  <script type="module">
+    // This is the Canvas 2D counterpart of 01-particles.html
+    // Same simulation, same amount of particles, but everything happens on the cpu:
+    // a javascript loop updates every particle, and every particle is drawn with its own fillRect call.
+    // Run both files side by side and compare the fps counter.
+
+    const canvas = document.querySelector('#c');
+    const ctx = canvas.getContext('2d');
+    const fpsElement = document.querySelector('#fps');
+
+    const particleCount = 200000;
+
+    // every particle is a plain object with a position, a velocity and two random values
+    // positions are in clip space (-1 to 1, y up), just like in the webgpu version
+    const particles = [];
+    for (let i = 0; i < particleCount; i++) {
+      particles.push({
+        x: Math.random() * 2 - 1,
+        y: Math.random() * 2 - 1,
+        vx: (Math.random() - 0.5) * 0.2,
+        vy: (Math.random() - 0.5) * 0.2,
+        // the shader calculates these from the particle index every frame
+        // on the cpu we can simply store them once per particle
+        random: Math.random(),
+        random2: Math.random(),
+      });
+    }
+
+    const properties = {
+      attract: 0
+    };
+    let mouseX = 0, mouseY = 0;
+    let previousTime = 0;
+
+    // fps counter: count the frames, update the text once per second
+    let frames = 0;
+    let fpsTime = 0;
+
+    const init = () => {
+      canvas.width = 1024;
+      canvas.height = 768;
+
+      canvas.addEventListener('mousemove', e => {
+        // convert the mouse position to clip space (-1 to 1, y up)
+        mouseX = map(e.offsetX, 0, canvas.clientWidth, -1, 1);
+        mouseY = map(e.offsetY, 0, canvas.clientHeight, 1, -1);
+      });
+      canvas.addEventListener('mouseover', () => gsap.to(properties, { duration: 1, ease: "power4.out", attract: 1}));
+      canvas.addEventListener('mouseout', () => gsap.to(properties, { duration: 1, ease: "power4.out", attract: 0}));
+
+      drawScene();
+    };
+
+    // ---- simulation: runs once for every particle, on the cpu ----
+    // this is a 1:1 port of the "simulate" compute shader in 01-particles.html
+
+    const simulate = (p, deltaTime) => {
+      const toMouseX = mouseX - p.x;
+      const toMouseY = mouseY - p.y;
+      const dist = Math.sqrt(toMouseX * toMouseX + toMouseY * toMouseY);
+      const directionX = toMouseX / Math.max(dist, 0.001);
+      const directionY = toMouseY / Math.max(dist, 0.001);
+      // a vector at 90 degrees to the direction of the mouse
+      const tangentX = -directionY;
+      const tangentY = directionX;
+      // half of the particles rotate clockwise, the other half counter clockwise
+      const spin = p.random > 0.5 ? 1 : -1;
+
+      // pull towards the mouse. The closer the particle gets, the weaker the pull, so it overshoots instead of stopping
+      const pullStrength = smoothstep(0, 0.4, dist) * (2 + p.random2 * 2);
+      const pullX = directionX * pullStrength;
+      const pullY = directionY * pullStrength;
+      // push sideways: this is what makes the particles rotate around the mouse
+      const swirlStrength = spin * (0.5 + p.random) * 2;
+      const swirlX = tangentX * swirlStrength;
+      const swirlY = tangentY * swirlStrength;
+
+      p.vx += (pullX + swirlX) * properties.attract * deltaTime;
+      p.vy += (pullY + swirlY) * properties.attract * deltaTime;
+      // a little bit of drag
+      p.vx *= 0.995;
+      p.vy *= 0.995;
+
+      // every particle has its own speed limit: faster particles end up in a bigger orbit
+      const maxSpeed = 0.3 + p.random * 0.7;
+      const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+      if (speed > maxSpeed) {
+        p.vx *= maxSpeed / speed;
+        p.vy *= maxSpeed / speed;
+      }
+
+      p.x += p.vx * deltaTime;
+      p.y += p.vy * deltaTime;
+
+      // bounce at the edges
+      if (Math.abs(p.x) > 1) {
+        p.vx = -p.vx;
+      }
+      if (Math.abs(p.y) > 1) {
+        p.vy = -p.vy;
+      }
+    };
+
+    const drawScene = (time = 0) => {
+      const deltaTime = Math.min((time - previousTime) / 1000, 0.05);
+      previousTime = time;
+
+      frames++;
+      if (time - fpsTime >= 1000) {
+        fpsElement.textContent = `${frames} fps`;
+        frames = 0;
+        fpsTime = time;
+      }
+
+      // 1. update the particles, one by one
+      for (let i = 0; i < particleCount; i++) {
+        simulate(particles[i], deltaTime);
+      }
+
+      // 2. draw the particles, one by one
+      ctx.fillStyle = '#0d0d1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let i = 0; i < particleCount; i++) {
+        const p = particles[i];
+        // convert clip space to pixels
+        const px = (p.x + 1) / 2 * canvas.width;
+        const py = (1 - p.y) / 2 * canvas.height;
+
+        // color: blue when slow, yellow when fast
+        const speed = Math.min(Math.sqrt(p.vx * p.vx + p.vy * p.vy), 1);
+        const r = mix(0.2, 1.0, speed) * 255;
+        const g = mix(0.5, 0.9, speed) * 255;
+        const b = mix(1.0, 0.3, speed) * 255;
+
+        // changing the fillStyle and calling fillRect for every single particle is what makes this slow
+        // the gpu version does all of this in parallel, in one draw call
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(px - 1.5, py - 1.5, 3, 3);
+      }
+
+      requestAnimationFrame(drawScene);
+    };
+
+    const map = (value, x1, y1, x2, y2) => (value - x1) * (y2 - x2) / (y1 - x1) + x2;
+    const mix = (a, b, t) => a + (b - a) * t;
+    // javascript version of the smoothstep function from the shader
+    const smoothstep = (edge0, edge1, x) => {
+      const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
+      return t * t * (3 - 2 * t);
+    };
+
+    init();
+  </script>
+</body>
+</html>

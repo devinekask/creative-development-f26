@@ -1545,7 +1545,7 @@ Go through the rest of the code, it should look familiar by now. Some things to 
 
 Compute shaders are the big new feature of WebGPU: you can run any calculation on the GPU, in parallel, without drawing a single pixel. The classic example is a particle system: we let the GPU update thousands of particles every frame, and then draw them.
 
-Open up [compute/01-particles.html](compute/01-particles.html). It simulates 20.000 particles which are attracted to your mouse cursor when hovering over the canvas, and end up swirling around it.
+Open up [compute/01-particles.html](compute/01-particles.html). It simulates 200.000 particles which are attracted to your mouse cursor when hovering over the canvas, and end up swirling around it.
 
 Read through the [Compute Shader Basics](https://webgpufundamentals.org/webgpu/lessons/webgpu-compute-shaders.html) on WebGPU Fundamentals first.
 
@@ -1656,7 +1656,6 @@ Some things to try:
 - make the size of a particle depend on its speed
 - add a `time` uniform and cycle the colors
 - push the particles away from the mouse instead of attracting them
-- increase the particle count to 200.000. Still smooth? Try doing the same simulation in javascript 😉
 
 # WGSL cheat sheet (coming from GLSL)
 
