@@ -1,9 +1,9 @@
-import * as THREE from 'three'
+import * as THREE from 'three/webgpu'
+import { wgslFn, uniform, uv, colorSpaceToWorking } from 'three/tsl'
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 
-import cyberFujiVertexShader from './shaders/cyberFuji/vertex.glsl?raw'
-import cyberFujiFragmentShader from './shaders/cyberFuji/fragment.glsl?raw'
+import cyberFujiShader from './shaders/cyberFuji/fragment.wgsl?raw'
 
 const canvas = document.querySelector('canvas.webgl')
 const scene = new THREE.Scene()
@@ -23,26 +23,33 @@ const controls = new OrbitControls(camera, canvas)
 controls.enableDamping = true
 controls.dampingFactor = 0.05
 
-const renderer = new THREE.WebGLRenderer({
+const renderer = new THREE.WebGPURenderer({
   canvas: canvas,
-  antialias: true
+  antialias: true,
+  alpha: false
 })
 renderer.setSize(size.width, size.height)
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 
-const texture = new THREE.TextureLoader().load( 'assets/baked.jpg' )
-texture.flipY = -1
-const material = new THREE.MeshBasicMaterial({ map: texture })
+const bakedTexture = new THREE.TextureLoader().load( 'assets/baked.jpg' )
+// glTF models expect textures with flipY disabled
+bakedTexture.flipY = false
+// the baked image contains display (sRGB) colors
+bakedTexture.colorSpace = THREE.SRGBColorSpace
+const material = new THREE.MeshBasicMaterial({ map: bakedTexture })
 
-const monitorPlaneMaterial = new THREE.ShaderMaterial({
-  uniforms: {
-    iTime: { value: 0 },
-    iResolution: { value: new THREE.Vector2(16, 9) },
-    iMouse: { value: new THREE.Vector2(0, 0) },
-  },
-  vertexShader: cyberFujiVertexShader,
-  fragmentShader: cyberFujiFragmentShader,
-})
+// uniforms are TSL nodes, we update their .value every frame
+const iTime = uniform(0)
+const iResolution = uniform(new THREE.Vector2(16, 9))
+
+const cyberFuji = wgslFn(cyberFujiShader)
+const monitorPlaneMaterial = new THREE.MeshBasicNodeMaterial()
+// the shadertoy shader outputs display-ready (sRGB) colors, tell three to treat them as such
+monitorPlaneMaterial.colorNode = colorSpaceToWorking(cyberFuji({
+  fragCoord: uv().mul(iResolution),
+  iTime,
+  iResolution,
+}), THREE.SRGBColorSpace)
 
 const loader = new GLTFLoader();
 loader.load(
@@ -66,11 +73,10 @@ const clock = new THREE.Clock()
 const draw = () => {
   const elapsedTime = clock.getElapsedTime()
 
-  monitorPlaneMaterial.uniforms.iTime.value = elapsedTime
-  
+  iTime.value = elapsedTime
+
   controls.update()
   renderer.render(scene, camera)
-  window.requestAnimationFrame(draw)
 }
 
 window.addEventListener('resize', () => {
@@ -87,4 +93,4 @@ window.addEventListener('resize', () => {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
 })
 
-draw()
+renderer.setAnimationLoop(draw)

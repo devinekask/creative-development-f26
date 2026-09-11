@@ -8,26 +8,61 @@ To learn how to work with Three.js, we are going to go with the lesson series at
 
 ## Hello Three.js
 
-To be able to run of the Thee.js code, you'll need to link the Three.js library. We'll just use the CDN for now. And, as you're just experimenting and learning right now, you don't really need to go through the trouble of settings up a bundler / transpiler.
+Three.js comes with two renderers: the classic `WebGLRenderer` and the newer `WebGPURenderer`. As we've just been writing raw WebGPU, we'll continue on that path and use the WebGPU renderer. It automatically falls back to WebGL2 on browsers without WebGPU support. Custom shaders are written in WGSL, and are plugged into three.js' node based materials (more on that at the end of this chapter).
+
+To be able to run the Three.js code, you'll need to link the Three.js library. We'll just use the CDN for now. And, as you're just experimenting and learning right now, you don't really need to go through the trouble of setting up a bundler / transpiler.
 
 To tell our browser where to find the threejs module, add an `<script type="importmap">` tag to your html:
 
 ```html
 <script type="importmap">{
   "imports": {
-    "three": "https://unpkg.com/three@0.156.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.156.0/examples/jsm/"
+    "three": "https://unpkg.com/three@0.186.0/build/three.webgpu.js",
+    "three/webgpu": "https://unpkg.com/three@0.186.0/build/three.webgpu.js",
+    "three/tsl": "https://unpkg.com/three@0.186.0/build/three.tsl.js",
+    "three/addons/": "https://unpkg.com/three@0.186.0/examples/jsm/"
   }
 }</script>
 ```
+
+The `three/webgpu` entry is the WebGPU build of three.js, `three/tsl` contains the shading language helpers we'll need for custom shaders, and `three/addons/` gives access to the extras (controls, loaders, ...). The plain `three` entry points to the WebGPU build as well, because the addons import from `three` internally.
 
 You'll write your code in a second script tag, with type module. This way you can use the import syntax to import the Three.js library:
 
 ```html
 <script type="module">
-  import * as THREE from 'three';
+  import * as THREE from 'three/webgpu';
 </script>
 ```
+
+> **Following the threejs.org manual with WebGPU**
+>
+> The manual pages use the WebGL renderer. When coding along, apply these changes:
+>
+> - import from `'three/webgpu'` instead of `'three'` (it exports everything `'three'` does, plus the WebGPU renderer and node materials).
+> - `new THREE.WebGLRenderer({canvas})` becomes `new THREE.WebGPURenderer({canvas, alpha: false})`. The `alpha: false` gives you the opaque black canvas the manual shows, leave it out if you want a transparent canvas.
+> - The WebGPU renderer initializes asynchronously, so you can't render right away. Instead of kicking off a `requestAnimationFrame` loop yourself, hand your render function to `renderer.setAnimationLoop(render)`: it waits for the renderer to be ready and then calls `render` every frame (with the same timestamp argument `requestAnimationFrame` gives you). Don't call `requestAnimationFrame` inside `render` anymore.
+>
+> ```javascript
+> // manual (WebGL)
+> const renderer = new THREE.WebGLRenderer({canvas});
+> function render(time) {
+>   // ...
+>   renderer.render(scene, camera);
+>   requestAnimationFrame(render);
+> }
+> requestAnimationFrame(render);
+>
+> // ours (WebGPU)
+> const renderer = new THREE.WebGPURenderer({canvas, alpha: false});
+> function render(time) {
+>   // ...
+>   renderer.render(scene, camera);
+> }
+> renderer.setAnimationLoop(render);
+> ```
+>
+> For a one-off render without a loop, wait for the renderer first: `await renderer.init(); renderer.render(scene, camera);`
 
 You'll start by going through the page at https://threejs.org/manual/#en/fundamentals where you'll build a basic Three.js scene, familiarizing yourself with some basic Three.js concepts.
 
@@ -93,7 +128,7 @@ In the script.js tag we add the basic boilerplate to setup a renderer, scene and
 import * as THREE from 'three';
 
 const canvas = document.querySelector('#c');
-const renderer = new THREE.WebGLRenderer({
+const renderer = new THREE.WebGPURenderer({
   canvas,
   alpha: true,
   antialias: true
@@ -111,7 +146,7 @@ const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0xf7d9aa, 100, 950);
 
 const init = () => {
-  requestAnimationFrame(render);
+  renderer.setAnimationLoop(render);
 };
 
 const render = () => {
@@ -122,7 +157,6 @@ const render = () => {
   }
 
   renderer.render(scene, camera);
-  requestAnimationFrame(render);
 };
 
 const resizeRendererToDisplaySize = (renderer) => {
@@ -210,7 +244,7 @@ const init = () => {
   scene.add(seaMesh);
   // end adding the sea mesh
 
-  requestAnimationFrame(render);
+  renderer.setAnimationLoop(render);
 };
 
 // here be some code
@@ -582,7 +616,7 @@ const { mesh: localSeaMesh } = createSea();
 seaMesh = localSeaMesh;
 seaMesh.position.y = -600;
 scene.add(seaMesh);
-2
+
 const { mesh: localSkyMesh } = createSky();
 skyMesh = localSkyMesh;
 skyMesh.position.y = -600;
@@ -632,7 +666,6 @@ const render = () => {
   updatePlane();
 
   renderer.render(scene, camera);
-  requestAnimationFrame(render);
 };
 ```
 
@@ -667,7 +700,7 @@ We can merge vertices with [the BufferGeometryUtils.mergeVertices](https://three
 Add an import for the BufferGeometryUtils at the top of your planeFancy.js file:
 
 ```javascript
-import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils';
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 ```
 
 Update the geomCockpit definition, so it removes the normal and uv attributes, and merges the vertices:
@@ -793,10 +826,56 @@ There's one more tutorial on the learning platform, which teaches you how to bak
 
 ![3d room with nice shadows and animation](images/three-baked-shader.gif)
 
+That tutorial was recorded with the WebGL renderer, where custom shaders are GLSL strings in a `ShaderMaterial`. With the WebGPU renderer, `ShaderMaterial` is not supported: custom shaders are written in WGSL (which you know from the previous chapter) and plugged into a node material through the `wgslFn` helper from `three/tsl`. The finished projects in `projects/shadertoy` and `projects/blender-three-bake-final` show the full setup, this is the pattern:
+
+Write your shader as a WGSL function which receives the pixel coordinate and the "uniforms" as regular parameters, and returns the color. Any helper functions go below the main function (`wgslFn` reads the signature of the first function in the string):
+
+```wgsl
+// shaders/cyberFuji/fragment.wgsl
+fn cyberFuji(fragCoord: vec2f, iTime: f32, iResolution: vec2f) -> vec4f {
+  var uv = (2.0 * fragCoord - iResolution) / iResolution.y;
+  // ... shadertoy code, ported to WGSL ...
+  return vec4f(col, 1.0);
+}
+
+fn sun(uv: vec2f, battery: f32, iTime: f32) -> f32 {
+  // ...
+}
+```
+
+In your javascript, import the WGSL as a string (the `?raw` suffix is a Vite feature), create `uniform()` nodes for the values you want to change from javascript, and connect it all to the `colorNode` of a `MeshBasicNodeMaterial`:
+
+```javascript
+import * as THREE from 'three/webgpu';
+import { wgslFn, uniform, uv, colorSpaceToWorking } from 'three/tsl';
+import cyberFujiShader from './shaders/cyberFuji/fragment.wgsl?raw';
+
+const iTime = uniform(0);
+const iResolution = uniform(new THREE.Vector2(16, 9));
+
+const cyberFuji = wgslFn(cyberFujiShader);
+const material = new THREE.MeshBasicNodeMaterial();
+// parameters are passed by name, fragCoord is calculated from the uv coordinates
+material.colorNode = colorSpaceToWorking(cyberFuji({
+  fragCoord: uv().mul(iResolution),
+  iTime,
+  iResolution,
+}), THREE.SRGBColorSpace);
+```
+
+Update the uniforms in your render loop by setting their `.value`:
+
+```javascript
+iTime.value = clock.getElapsedTime();
+```
+
+The `colorSpaceToWorking(..., THREE.SRGBColorSpace)` wrapper tells three.js that the shader outputs display-ready colors (like shadertoy does), so it doesn't brighten them in its color management pass. When your whole scene is a shader, you can set `renderer.outputColorSpace = THREE.LinearSRGBColorSpace` instead, as done in the shadertoy project. That project also shows how to render a shader into a `RenderTarget` and sample it in a second shader, by passing the texture node as both the `texture_2d<f32>` and the `sampler` parameter of your WGSL function.
+
 # Where to go from here
 
 - https://threejs.org/manual/ - the manual our fundamentals projects were based on; continue with the chapters on materials, lights, shadows, loading glTF models and post-processing
-- https://threejs.org/examples/ - hundreds of official examples, each with a link to its source code
+- https://threejs.org/examples/?q=webgpu - hundreds of official examples, each with a link to its source code; the WebGPU ones are a great starting point for your own experiments
+- https://github.com/mrdoob/three.js/wiki/Three.js-Shading-Language - the TSL wiki: how custom shaders and node materials work in the WebGPU renderer
 - https://discourse.threejs.org/c/showcase/ - the community showcase, great for seeing what's possible
 - https://tympanus.net/codrops/ - demos and tutorials on creative web effects; The Aviator started as a Codrops tutorial: https://tympanus.net/codrops/2016/04/26/the-aviator-animating-basic-3d-scene-threejs/
 - https://codepen.io/Yakudoo - CodePens by Karim Maaloul, the creator of The Aviator

@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { Colors } from '../constants/colors';
 
 export const createCloud = () => {

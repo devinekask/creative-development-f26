@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { createLights } from './objects/lights';
 import { createSea } from './objects/seaFancy';
 import { createSky } from './objects/sky';
@@ -6,7 +6,7 @@ import { createPlane } from './objects/planeFancy';
 
 const mousePos = {x:0, y:0};
 const canvas = document.querySelector('#c');
-const renderer = new THREE.WebGLRenderer({
+const renderer = new THREE.WebGPURenderer({
   canvas,
   alpha: true,
   antialias: true,
@@ -53,7 +53,7 @@ const init = () => {
   scene.add(planeMesh);
 
   document.addEventListener('mousemove', handleMouseMove, false);
-  requestAnimationFrame(render);
+  renderer.setAnimationLoop(render);
 };
 
 const render = () => {
@@ -70,7 +70,6 @@ const render = () => {
   seaAnimate();
 
   renderer.render(scene, camera);
-  requestAnimationFrame(render);
 };
 
 const resizeRendererToDisplaySize = (renderer) => {

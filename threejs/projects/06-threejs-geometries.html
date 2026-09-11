@@ -21,18 +21,20 @@
   <canvas id="c"></canvas>
   <script type="importmap">{
     "imports": {
-      "three": "https://unpkg.com/three@0.156.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.156.0/examples/jsm/"
+      "three": "https://unpkg.com/three@0.186.0/build/three.webgpu.js",
+      "three/webgpu": "https://unpkg.com/three@0.186.0/build/three.webgpu.js",
+      "three/tsl": "https://unpkg.com/three@0.186.0/build/three.tsl.js",
+      "three/addons/": "https://unpkg.com/three@0.186.0/examples/jsm/"
     }
   }</script>
   <script type="module">
-    import * as THREE from 'three';
+    import * as THREE from 'three/webgpu';
     import { FontLoader } from 'three/addons/loaders/FontLoader.js';
     import { ParametricGeometry } from 'three/addons/geometries/ParametricGeometry.js';
     import { TextGeometry } from 'three/addons/geometries/TextGeometry.js';
 
     const canvas = document.querySelector('#c');
-    const renderer = new THREE.WebGLRenderer({canvas});
+    const renderer = new THREE.WebGPURenderer({canvas});
 
     const fov = 40;
     const aspect = 2;  // the canvas default
@@ -315,7 +317,7 @@
         addLineGeometry(-1, -2, geometry);
       }
 
-      requestAnimationFrame(render);
+      renderer.setAnimationLoop(render);
     };
 
     // promisify font loading
@@ -375,8 +377,6 @@
       });
     
       renderer.render(scene, camera);
-    
-      requestAnimationFrame(render);
     };
 
     const resizeRendererToDisplaySize = (renderer) => {

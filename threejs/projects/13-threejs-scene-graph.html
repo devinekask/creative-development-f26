@@ -22,15 +22,17 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.6/dat.gui.min.js"></script>
   <script type="importmap">{
     "imports": {
-      "three": "https://unpkg.com/three@0.156.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.156.0/examples/jsm/"
+      "three": "https://unpkg.com/three@0.186.0/build/three.webgpu.js",
+      "three/webgpu": "https://unpkg.com/three@0.186.0/build/three.webgpu.js",
+      "three/tsl": "https://unpkg.com/three@0.186.0/build/three.tsl.js",
+      "three/addons/": "https://unpkg.com/three@0.186.0/examples/jsm/"
     }
   }</script>
   <script type="module">
-    import * as THREE from 'three';
+    import * as THREE from 'three/webgpu';
 
     const canvas = document.querySelector('#c');
-    const renderer = new THREE.WebGLRenderer({canvas});
+    const renderer = new THREE.WebGPURenderer({canvas});
 
     const fov = 40;
     const aspect = 2;  // the canvas default
@@ -99,7 +101,7 @@
       makeAxisGrid(earthMesh, 'earthMesh');
       makeAxisGrid(moonMesh, 'moonMesh');
 
-      requestAnimationFrame(render);
+      renderer.setAnimationLoop(render);
     };
 
     const makeAxisGrid = (node, label, units) => {
@@ -121,8 +123,6 @@
       });
     
       renderer.render(scene, camera);
-    
-      requestAnimationFrame(render);
     };
 
     const resizeRendererToDisplaySize = (renderer) => {

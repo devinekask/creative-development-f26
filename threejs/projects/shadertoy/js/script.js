@@ -1,10 +1,10 @@
 // https://www.shadertoy.com/view/XsVSDz
-import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import * as THREE from 'three/webgpu';
+import { wgslFn, uniform, uv, texture } from 'three/tsl';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-import plasmaBufferShader from './shaders/plasma/buffer.glsl?raw';
-import plasmaFragmentShader from './shaders/plasma/fragment.glsl?raw';
-import plasmaVertexShader from './shaders/plasma/vertex.glsl?raw';
+import plasmaBufferShader from './shaders/plasma/buffer.wgsl?raw';
+import plasmaFragmentShader from './shaders/plasma/fragment.wgsl?raw';
 
 const $canvas = document.getElementById('webgl');
 let renderer, camera, scene, controls;
@@ -13,27 +13,40 @@ let plane, material;
 let renderTarget, rtScene, rtCamera, rtMaterial;
 const mouse = new THREE.Vector2();
 
+// uniforms are TSL nodes, we update their .value every frame
+const rtUniforms = {
+  iTime: uniform(0),
+  iMouse: uniform(new THREE.Vector2(0, 0)),
+  iResolution: uniform(new THREE.Vector2(2, 2)),
+};
+const uniforms = {
+  iTime: uniform(0),
+  iMouse: uniform(new THREE.Vector2(0, 0)),
+  iResolution: uniform(new THREE.Vector2(2, 2)),
+};
+
 const init = () => {
   console.log('init');
 
-  renderer = new THREE.WebGLRenderer({canvas: $canvas});
+  renderer = new THREE.WebGPURenderer({canvas: $canvas, alpha: false});
+  // shadertoy shaders output display-ready colors, so skip the linear to sRGB conversion
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
 
   // shader renderer
   const effectPlaneGeometry = new THREE.PlaneGeometry(2, 2);
-  rtMaterial = new THREE.ShaderMaterial({
-    uniforms: {
-      iTime: {value: 0},
-      iMouse: {value: new THREE.Vector4(0, 0, 0, 0)},
-      iResolution: {value: new THREE.Vector2(2, 2)},
-    },
-    vertexShader: plasmaVertexShader,
-    fragmentShader: plasmaBufferShader,
+  const plasmaBuffer = wgslFn(plasmaBufferShader);
+  rtMaterial = new THREE.MeshBasicNodeMaterial();
+  rtMaterial.colorNode = plasmaBuffer({
+    fragCoord: uv().mul(rtUniforms.iResolution),
+    iTime: rtUniforms.iTime,
+    iMouse: rtUniforms.iMouse,
+    iResolution: rtUniforms.iResolution,
   });
   const effectPlane = new THREE.Mesh(effectPlaneGeometry, rtMaterial);
   rtCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   rtScene = new THREE.Scene();
   rtScene.add(effectPlane);
-  renderTarget = new THREE.WebGLRenderTarget(100, 100, {
+  renderTarget = new THREE.RenderTarget(100, 100, {
     minFilter: THREE.LinearFilter,
     magFilter: THREE.LinearFilter,
   });
@@ -49,15 +62,17 @@ const init = () => {
   controls.dampingFactor = 0.05;
 
   const geometry = new THREE.PlaneGeometry(2, 2);
-  material = new THREE.ShaderMaterial({
-    uniforms: {
-      iTime: { value: 0 },
-      iResolution: { value: new THREE.Vector2(2, 2) },
-      iMouse: { value: new THREE.Vector2(0, 0) },
-      iChannel0: { value: renderTarget.texture },
-    },
-    vertexShader: plasmaVertexShader,
-    fragmentShader: plasmaFragmentShader,
+  const plasma = wgslFn(plasmaFragmentShader);
+  // the render target texture is passed twice: once as texture, once as sampler
+  const iChannel0 = texture(renderTarget.texture);
+  material = new THREE.MeshBasicNodeMaterial();
+  material.colorNode = plasma({
+    fragCoord: uv().mul(uniforms.iResolution),
+    iTime: uniforms.iTime,
+    iMouse: uniforms.iMouse,
+    iResolution: uniforms.iResolution,
+    iChannel0: iChannel0,
+    iChannel0Sampler: iChannel0,
   });
   plane = new THREE.Mesh(geometry, material);
   scene.add(plane);
@@ -70,26 +85,23 @@ const init = () => {
     mouse.y = e.clientY;
   });
 
-  requestAnimationFrame(draw);
+  renderer.setAnimationLoop(draw);
 };
 
 const draw = () => {
   const elapsedTime = clock.getElapsedTime();
 
-  rtMaterial.uniforms.iTime.value = elapsedTime;
-  rtMaterial.uniforms.iMouse.value.x = mouse.x;
-  rtMaterial.uniforms.iMouse.value.y = mouse.y;
-  material.uniforms.iTime.value = elapsedTime * 2;
-  material.uniforms.iMouse.value.x = mouse.x;
-  material.uniforms.iMouse.value.y = mouse.y;
-  
+  rtUniforms.iTime.value = elapsedTime;
+  rtUniforms.iMouse.value.set(mouse.x, mouse.y);
+  uniforms.iTime.value = elapsedTime * 2;
+  uniforms.iMouse.value.set(mouse.x, mouse.y);
+
   renderer.setRenderTarget(renderTarget);
   renderer.render(rtScene, rtCamera);
   renderer.setRenderTarget(null);
 
   controls.update();
   renderer.render(scene, camera);
-  requestAnimationFrame(draw);
 };
 
 const resize = () => {
