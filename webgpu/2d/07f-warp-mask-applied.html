@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebGPU</title>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <script type="module">
+    const canvas = document.querySelector('#c');
+
+    if (!navigator.gpu) {
+      document.body.textContent = 'WebGPU is not supported in this browser';
+      throw new Error('WebGPU not supported');
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+
+    const context = canvas.getContext('webgpu');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format, alphaMode: 'premultiplied' });
+
+    const shaderModule = device.createShaderModule({ code: `
+      struct VertexOutput {
+        @builtin(position) position: vec4f,
+        @location(0) uv: vec2f,
+        @location(1) vertPos: vec2f,
+      };
+
+      @vertex
+      fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+        // 2 triangles, filling the whole canvas
+        let positions = array(
+          vec2f(-1.0,  1.0),
+          vec2f( 1.0,  1.0),
+          vec2f(-1.0, -1.0),
+
+          vec2f(-1.0, -1.0),
+          vec2f( 1.0,  1.0),
+          vec2f( 1.0, -1.0),
+        );
+        let position = positions[vertexIndex];
+
+        var output: VertexOutput;
+        output.position = vec4f(position, 0.0, 1.0);
+        // convert clip space (-1 to 1, y up) to uv space (0 to 1, y down)
+        output.uv = vec2f(position.x + 1.0, 1.0 - position.y) * 0.5;
+        output.vertPos = position;
+        return output;
+      }
+
+      struct Uniforms {
+        distortion: f32,
+      };
+      @group(0) @binding(0) var<uniform> uniforms: Uniforms;
+      @group(0) @binding(1) var imageSampler: sampler;
+      @group(0) @binding(2) var image: texture_2d<f32>;
+
+      @fragment
+      fn fragmentMain(@location(0) uv: vec2f, @location(1) vertPos: vec2f) -> @location(0) vec4f {
+        var ndc_pos = vertPos;
+        let testVec = ndc_pos.xy / max(abs(ndc_pos.x), abs(ndc_pos.y));
+        let len = max(1.0, length(testVec));
+        ndc_pos *= mix(1.0, mix(1.0, len, max(abs(ndc_pos.x), abs(ndc_pos.y))), uniforms.distortion);
+        var texCoord = vec2f(ndc_pos.x, -ndc_pos.y) * 0.5 + 0.5;
+
+        let sampleColor = textureSample(image, imageSampler, texCoord);
+
+        var mask = 1.0;
+        mask *= smoothstep(0.0, 0.1, texCoord.x);
+        mask *= 1.0 - smoothstep(0.9, 1.0, texCoord.x);
+        mask *= smoothstep(0.0, 0.1, texCoord.y);
+        mask *= 1.0 - smoothstep(0.9, 1.0, texCoord.y);
+
+        return sampleColor * mask;
+      }
+    `});
+
+    const pipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: shaderModule, entryPoint: 'vertexMain' },
+      fragment: { module: shaderModule, entryPoint: 'fragmentMain', targets: [{ format }] },
+    });
+
+    const sampler = device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'clamp-to-edge',
+      addressModeV: 'clamp-to-edge',
+    });
+
+    // the offsets (in floats) of each uniform value, must match the Uniforms struct in the shader
+    const uniforms = { distortion: 0 };
+    const uniformValues = new Float32Array(4);
+    const setUniform = (name, ...values) => uniformValues.set(values, uniforms[name]);
+    const uniformBuffer = device.createBuffer({
+      size: uniformValues.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    let bindGroup;
+
+    let distortion = 1.0;
+
+    const init = async () => {
+      const imgTexture = await loadImage("images/devine_selectie-087.jpg");
+      const texture = createTextureFromImage(imgTexture);
+
+      bindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuffer } },
+          { binding: 1, resource: sampler },
+          { binding: 2, resource: texture.createView() },
+        ],
+      });
+
+      canvas.width = imgTexture.width;
+      canvas.height = imgTexture.height;
+
+      drawScene();
+    };
+
+    const drawScene = () => {
+      setUniform('distortion', distortion);
+      device.queue.writeBuffer(uniformBuffer, 0, uniformValues);
+
+      const encoder = device.createCommandEncoder();
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: context.getCurrentTexture().createView(),
+          clearValue: [0, 0, 0, 0],
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(6); // 2 triangles = 6 vertices
+      pass.end();
+      device.queue.submit([encoder.finish()]);
+
+      requestAnimationFrame(drawScene);
+    };
+
+    const loadImage = async (src) => {
+      const response = await fetch(src);
+      const blob = await response.blob();
+      return createImageBitmap(blob);
+    };
+
+    const map = (value, x1, y1, x2, y2) => (value - x1) * (y2 - x2) / (y1 - x1) + x2;
+
+    const createTextureFromImage = (image) => {
+      const texture = device.createTexture({
+        size: [image.width, image.height],
+        format: 'rgba8unorm',
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+      device.queue.copyExternalImageToTexture({ source: image }, { texture }, [image.width, image.height]);
+      return texture;
+    };
+
+    init();
+  </script>
+</body>
+</html>
