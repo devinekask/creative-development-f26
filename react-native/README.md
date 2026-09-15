@@ -11,6 +11,9 @@ See also: https://expo.dev/
 ## Prerequisites
 
 - Make sure to install XCode (through App store)
+
+  > ℹ️ **Xcode 27**: the iOS Simulator is now launched through the **Device Hub** in Xcode. Open Xcode once after installing, go to the Device Hub, make sure an iOS simulator runtime is installed and start a simulator from there. Once a simulator is running, Expo's "run on iOS simulator" option will pick it up.
+
 - Have a working [homebrew](https://brew.sh/) installation on your system. Not sure if you've got Homebrew on your system? Open a Terminal and type:
 
   ```bash
