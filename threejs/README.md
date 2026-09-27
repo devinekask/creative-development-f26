@@ -880,6 +880,8 @@ The `colorSpaceToWorking(..., THREE.SRGBColorSpace)` wrapper tells three.js that
 - https://tympanus.net/codrops/ - demos and tutorials on creative web effects; The Aviator started as a Codrops tutorial: https://tympanus.net/codrops/2016/04/26/the-aviator-animating-basic-3d-scene-threejs/
 - https://codepen.io/Yakudoo - CodePens by Karim Maaloul, the creator of The Aviator
 - https://threejs-journey.com/ - Bruno Simon's (paid) course, the gold standard for learning Three.js in depth - and check his portfolio at https://bruno-simon.com/
+- https://www.youtube.com/watch?v=AB6sulUMRGE - Tutorial: Create a Cute Award-Winning Room Portfolio with Three.js and Blender | Beginner Course
+- https://www.youtube.com/watch?v=X3pPAdQBKHo - Tutorial: Intro to Creative Web Development with Three.js and Blender | Create a 3D Portfolio for Beginners
 - https://www.awwwards.com/websites/webgl/ - award-winning sites built with WebGL
 - https://www.youtube.com/@akella_ - Yuri Artiukh live-codes recreations of award-winning WebGL effects
 - https://blog.maximeheckel.com/ - in-depth articles on shaders and creative coding on the web
