@@ -10,7 +10,7 @@ To learn how to work with Three.js, we are going to go with the lesson series at
 
 Three.js comes with two renderers: the classic `WebGLRenderer` and the newer `WebGPURenderer`. As we've just been writing raw WebGPU, we'll continue on that path and use the WebGPU renderer. It automatically falls back to WebGL2 on browsers without WebGPU support. Custom shaders are written in WGSL, and are plugged into three.js' node based materials (more on that at the end of this chapter).
 
-To be able to run the Three.js code, you'll need to link the Three.js library. We'll just use the CDN for now. And, as you're just experimenting and learning right now, you don't really need to go through the trouble of setting up a bundler / transpiler.
+To be able to run the Three.js code, you'll need to link the Three.js library. We'll just use the CDN for now. And, as you're just experimenting and learning right now, you don't really need to go through the trouble of setting up a bundler / transpiler. We'll switch to a bundler for the bigger projects later in this chapter.
 
 To tell our browser where to find the threejs module, add an `<script type="importmap">` tag to your html:
 
@@ -90,7 +90,37 @@ We'll build a fun little interactive 3D scene, based on the tutorial at https://
 
 ![end result of tutorial, controlling a 3d plane by moving the mouse](images/threejs-aviator-final.gif)
 
-Start with a basic html file, which as a couple of style rules to make sure the canvas is fullscreen and our body has a gradient background:
+### Project setup
+
+For this project we'll switch from the CDN import map to a bundler. Our code will be split into several modules (a file per object, a file for the colors), and in the next exercise we'll import shader files as well. [Vite](https://vite.dev/) serves our project during development, resolves the `three` imports from `node_modules`, and can build an optimized version of the project when we're done.
+
+Create a new folder for the project, and initialize it as an npm project, with three.js as a dependency and Vite as a development dependency:
+
+```bash
+npm init -y
+npm install three
+npm install -D vite
+```
+
+Optionally, install the type definitions as well, they give you autocompletion for the three.js api in VS Code:
+
+```bash
+npm install -D @types/three
+```
+
+Add a `dev` script to the `scripts` section of your `package.json`:
+
+```json
+"scripts": {
+  "dev": "vite"
+},
+```
+
+Running `npm run dev` starts the Vite development server. It serves the `index.html` from your project root at the url it prints in the terminal, and reloads the page whenever you save a file.
+
+### Html and boilerplate
+
+Start with a basic `index.html` file, which has a couple of style rules to make sure the canvas is fullscreen and our body has a gradient background:
 
 ```html
 <!DOCTYPE html>
@@ -122,10 +152,10 @@ Start with a basic html file, which as a couple of style rules to make sure the 
 </html>
 ```
 
-In the script.js tag we add the basic boilerplate to setup a renderer, scene and camera, with resize logic as well. Make sure to either add the import maps for three in your html file, or use a bundler to import the threejs library.
+Note that there's no import map in this html file: Vite resolves the imports from `node_modules`. In `js/script.js` we add the basic boilerplate to setup a renderer, scene and camera, with resize logic as well. We import from `three/webgpu`: the plain `three` entry of the npm package is the WebGL build, which doesn't contain the WebGPU renderer (the CDN import map we used before pointed `three` at the WebGPU build for us).
 
 ```javascript
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 
 const canvas = document.querySelector('#c');
 const renderer = new THREE.WebGPURenderer({
@@ -194,7 +224,7 @@ export const Colors = {
 Let's create a mesh for the sea. Add a file `objects/sea.js` with the following code:
 
 ```javascript
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { Colors } from '../constants/colors';
 
 export const createSea = () => {
@@ -259,7 +289,7 @@ You should see part of a dark cylinder on your screen:
 Let's add some lights to the scene. Add a file `objects/lights.js` with the following code:
 
 ```javascript
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 
 export const createLights = () => {
   // A hemisphere light is a gradient colored light; 
@@ -316,7 +346,7 @@ Let's create a sky with some clouds. The clouds will be a combination of a coupl
 Create a file `objects/cloud.js` with the following code:
 
 ```javascript
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { Colors } from '../constants/colors';
 
 export const createCloud = () => {
@@ -366,7 +396,7 @@ export const createCloud = () => {
 This is the code for one single cloud. Create another file `objects/sky.js` where we'll create multiple clouds:
 
 ```javascript
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { createCloud } from "./cloud";
 
 export const createSky = () => {
@@ -431,7 +461,7 @@ scene.add(skyMesh);
 Add another file called `objects/plane.js` with the following code:
 
 ```javascript
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { Colors } from '../constants/colors';
 
 export const createPlane = () => {
@@ -820,56 +850,585 @@ seaAnimate = localSeaAnimate;
 
 Call the global `seaAnimate` method in your render loop, and you should see a moving sea.
 
+## Shadertoy shader in Three.js
+
+In the WebGPU chapter you ported a Shadertoy shader to WGSL and rendered it on a fullscreen quad (see [Using a Shadertoy shader](../webgpu/README.md#using-a-shadertoy-shader)). In this exercise we'll bring a Shadertoy shader into a Three.js project: the shader becomes the material of a mesh in a 3D scene you can orbit around. Along the way you'll learn how Three.js lets you plug WGSL into its materials, and how to render a shader into a texture, so it can be used by another shader.
+
+We'll port the plasma effect at https://www.shadertoy.com/view/XsVSDz. Open it and look at the tabs above the code: next to **Image** there's a **Buffer A** tab. Buffer A is a second shader, which renders a color palette into a texture. The Image shader receives that texture as `iChannel0` and uses it to color the plasma. So we'll need two WGSL shaders and two render passes.
+
+![plasma shader on a plane in a three.js scene](images/three-shadertoy-05-final.png)
+
+The finished project is in `projects/shadertoy`, try to follow the steps before peeking.
+
+### Project setup
+
+Create a new Vite project, the same way as for The Aviator: `npm init -y`, `npm install three`, `npm install -D vite`, and the `dev` script in your `package.json`.
+
+Create an `index.html` with a fullscreen canvas:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Three Shadertoy</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="webgl"></canvas>
+  <script src="js/script.js" type="module"></script>
+</body>
+</html>
+```
+
+And the stylesheet, `css/style.css`:
+
+```css
+*
+{
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body
+{
+    overflow: hidden;
+}
+
+#webgl
+{
+    position: fixed;
+    top: 0;
+    left: 0;
+    outline: none;
+    width: 100%;
+    height: 100%;
+}
+```
+
+Create an empty `js/script.js` and run `npm run dev`. You should get a blank page, without errors in the console.
+
+### Three.js boilerplate
+
+Add the basic Three.js setup to `js/script.js`: a WebGPU renderer, a camera, a scene with orbit controls, and a plane with a plain magenta material. We'll replace that material with our shader in the next step.
+
+```javascript
+import * as THREE from 'three/webgpu';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $canvas = document.getElementById('webgl');
+let renderer, camera, scene, controls;
+let clock = new THREE.Clock();
+let plane, material;
+const mouse = new THREE.Vector2();
+
+const init = () => {
+  renderer = new THREE.WebGPURenderer({canvas: $canvas, alpha: false});
+
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 100);
+  camera.position.set(0, 0, 10);
+
+  scene = new THREE.Scene();
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  const geometry = new THREE.PlaneGeometry(2, 2);
+  material = new THREE.MeshBasicMaterial({color: 0xff00ff});
+  plane = new THREE.Mesh(geometry, material);
+  scene.add(plane);
+
+  window.addEventListener('resize', resize);
+  resize();
+
+  window.addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
+
+  renderer.setAnimationLoop(draw);
+};
+
+const draw = () => {
+  controls.update();
+  renderer.render(scene, camera);
+};
+
+const resize = () => {
+  renderer.setSize(window.innerWidth * window.devicePixelRatio, window.innerHeight * window.devicePixelRatio, false);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+};
+
+init();
+```
+
+A few things to note:
+
+- The renderer is created with `alpha: false`, so we get a black background instead of a transparent canvas.
+- `resize()` sets the canvas size to the window size times the device pixel ratio. The third argument of `setSize` is `false`, so Three.js doesn't touch the css size of the canvas (our stylesheet already makes it fullscreen).
+- We keep track of the mouse position and create a `Clock`. We'll pass the mouse position and the elapsed time to the shader later.
+
+![a magenta plane](images/three-shadertoy-01-plane.png)
+
+### A first WGSL function
+
+Three.js materials for the WebGPU renderer are *node materials*: their properties (color, opacity, position, ...) can be nodes, small building blocks which get compiled into the final shader. The `three/tsl` module (TSL stands for Three Shading Language) contains functions to create those nodes. One of them, `wgslFn`, takes a string with a WGSL function and turns it into a node you can call.
+
+Create a file `js/shaders/plasma/fragment.wgsl` with a small test function:
+
+```wgsl
+fn plasma(fragCoord: vec2f, iResolution: vec2f) -> vec4f {
+  let uv = fragCoord / iResolution;
+  return vec4f(uv, 0.0, 1.0);
+}
+```
+
+Compared to the WebGPU chapter, there's no `@fragment` entry point, no `@builtin(position)` and no uniform struct with `@group` / `@binding` decorations. It's a plain function: everything it needs comes in as parameters, and it returns the color. Three.js generates the entry point and the bindings for us.
+
+Import the file in your `script.js`. The `?raw` suffix is a Vite feature which imports the file contents as a string (the `.wgsl` extension is just a convention, Vite doesn't care):
+
+```javascript
+import { wgslFn, uniform, uv } from 'three/tsl';
+
+import plasmaFragmentShader from './shaders/plasma/fragment.wgsl?raw';
+```
+
+Replace the magenta material with a `MeshBasicNodeMaterial`, and set its `colorNode` to a call of our WGSL function:
+
+```javascript
+  const uniforms = {
+    iResolution: uniform(new THREE.Vector2(2, 2)),
+  };
+
+  const geometry = new THREE.PlaneGeometry(2, 2);
+  const plasma = wgslFn(plasmaFragmentShader);
+  material = new THREE.MeshBasicNodeMaterial();
+  material.colorNode = plasma({
+    fragCoord: uv().mul(uniforms.iResolution),
+    iResolution: uniforms.iResolution,
+  });
+  plane = new THREE.Mesh(geometry, material);
+  scene.add(plane);
+```
+
+What's happening here:
+
+- `wgslFn(plasmaFragmentShader)` reads the signature of the function in the string (its name, parameters and types) and returns a javascript function.
+- Calling that function with an object creates the node. The properties of the object are matched **by name** to the parameters of the WGSL function, so the names have to correspond.
+- The values you pass in are nodes as well. `uv()` is the uv coordinate of the plane (0 to 1 in both directions), `uniform(...)` is a value we can change from javascript (more on that in the next step). `uv().mul(uniforms.iResolution)` multiplies the two: this is how we rebuild Shadertoy's `fragCoord`. On Shadertoy that's the pixel coordinate, going from 0 to the resolution of the canvas. Our "canvas" is the plane, and we tell the shader it's 2 by 2 "pixels" big, the size of our plane. As the shader divides `fragCoord` by `iResolution` right away, the actual value doesn't matter much.
+- `colorNode` is the color output of the material: whatever our function returns is what gets drawn.
+
+Your plane should now show a uv gradient: red increases to the right, green increases to the top.
+
+![uv gradient on the plane](images/three-shadertoy-02-uv.png)
+
+### Uniforms from javascript
+
+A Shadertoy shader uses a couple of built-in inputs: `iTime`, `iMouse`, `iResolution`, ... In the WebGPU chapter you had to create a uniform buffer for these, calculate the offsets, and write into it every frame. With TSL, a `uniform()` node does all of that: you create it with an initial value, and update its `.value` property whenever you want.
+
+Complete the uniforms object with `iTime` and `iMouse`, and move it to the top of your script (right after the `mouse` declaration), as we'll need it in the render loop as well:
+
+```javascript
+// uniforms are TSL nodes, we update their .value every frame
+const uniforms = {
+  iTime: uniform(0),
+  iMouse: uniform(new THREE.Vector2(0, 0)),
+  iResolution: uniform(new THREE.Vector2(2, 2)),
+};
+```
+
+Pass all of them to the shader function:
+
+```javascript
+  material.colorNode = plasma({
+    fragCoord: uv().mul(uniforms.iResolution),
+    iTime: uniforms.iTime,
+    iMouse: uniforms.iMouse,
+    iResolution: uniforms.iResolution,
+  });
+```
+
+Update their values at the start of your `draw` function:
+
+```javascript
+const draw = () => {
+  const elapsedTime = clock.getElapsedTime();
+
+  uniforms.iTime.value = elapsedTime * 2;
+  uniforms.iMouse.value.set(mouse.x, mouse.y);
+
+  controls.update();
+  renderer.render(scene, camera);
+};
+```
+
+Add the new parameters to the WGSL function as well (again: the names must match), and use the time to animate the blue channel, to check that everything is connected:
+
+```wgsl
+fn plasma(fragCoord: vec2f, iTime: f32, iMouse: vec2f, iResolution: vec2f) -> vec4f {
+  let uv = fragCoord / iResolution;
+  return vec4f(uv, 0.5 + 0.5 * sin(iTime), 1.0);
+}
+```
+
+The gradient should now pulse: more blue, less blue.
+
+### Porting the Image shader
+
+Time to port the actual shader. This is the GLSL code in the **Image** tab on Shadertoy:
+
+```glsl
+const vec2 vp = vec2(320.0, 200.0);
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+	float t = iTime * 10.0 + iMouse.x;
+	vec2 uv = fragCoord.xy / iResolution.xy;
+    vec2 p0 = (uv - 0.5) * vp;
+    vec2 hvp = vp * 0.5;
+	vec2 p1d = vec2(cos( t / 98.0),  sin( t / 178.0)) * hvp - p0;
+	vec2 p2d = vec2(sin(-t / 124.0), cos(-t / 104.0)) * hvp - p0;
+	vec2 p3d = vec2(cos(-t / 165.0), cos( t / 45.0))  * hvp - p0;
+    float sum = 0.5 + 0.5 * (
+		cos(length(p1d) / 30.0) +
+		cos(length(p2d) / 20.0) +
+		sin(length(p3d) / 25.0) * sin(p3d.x / 20.0) * sin(p3d.y / 15.0));
+    fragColor = texture(iChannel0, vec2(fract(sum), 0));
+}
+```
+
+Ignore the last line for now (we don't have `iChannel0` yet), and try to port the rest yourself, using the [WGSL cheat sheet](../webgpu/README.md#wgsl-cheat-sheet-coming-from-glsl). Return `sum` as a grayscale color, so you can see the result. Tip: the module-level `const vp` can become a `let` inside the function.
+
+This is the solution:
+
+```wgsl
+fn plasma(fragCoord: vec2f, iTime: f32, iMouse: vec2f, iResolution: vec2f) -> vec4f {
+  let vp = vec2f(320.0, 200.0);
+  let t = iTime * 10.0 + iMouse.x;
+  let uv = fragCoord / iResolution;
+  let p0 = (uv - 0.5) * vp;
+  let hvp = vp * 0.5;
+  let p1d = vec2f(cos( t / 98.0),  sin( t / 178.0)) * hvp - p0;
+  let p2d = vec2f(sin(-t / 124.0), cos(-t / 104.0)) * hvp - p0;
+  let p3d = vec2f(cos(-t / 165.0), cos( t / 45.0))  * hvp - p0;
+  let sum = 0.5 + 0.5 * (
+    cos(length(p1d) / 30.0) +
+    cos(length(p2d) / 20.0) +
+    sin(length(p3d) / 25.0) * sin(p3d.x / 20.0) * sin(p3d.y / 15.0));
+  return vec4f(vec3f(fract(sum)), 1.0);
+}
+```
+
+The usual rules applied: `vec2` becomes `vec2f`, `float` becomes `f32` (or just `let`, WGSL infers the type), the `out` parameter becomes a return value, and the math functions keep their names. Move your mouse horizontally to change the speed of the animation.
+
+![grayscale plasma](images/three-shadertoy-03-grayscale.png)
+
+### Buffer A: rendering a shader into a texture
+
+Look at the **Buffer A** tab on Shadertoy:
+
+```glsl
+const float pi = 3.1415926435;
+
+void mainImage( out vec4 fragColor, in vec2 fragCoord )
+{
+  float i = fragCoord.x / iResolution.x;
+  vec3 t = (iTime + iMouse.y) / vec3(63.0, 78.0, 45.0);
+  vec3 cs = cos(i * pi * 2.0 + vec3(0.0, 1.0, -0.5) * pi + t);
+  fragColor = vec4(0.5 + 0.5 * cs, 1.0);
+}
+```
+
+It generates a horizontal color gradient which changes over time: a color palette. The Image shader looks up a color in that palette with `texture(iChannel0, vec2(fract(sum), 0))` (the y coordinate is always 0, only the x coordinate matters). To make this work in Three.js, we'll render this shader into a *render target*: a texture we can draw into, and afterwards use like any other texture.
+
+Create `js/shaders/plasma/buffer.wgsl` with the port of Buffer A:
+
+```wgsl
+// generates the color palette the plasma shader samples from
+fn plasmaBuffer(fragCoord: vec2f, iTime: f32, iMouse: vec2f, iResolution: vec2f) -> vec4f {
+  let pi = 3.1415926435;
+  let i = fragCoord.x / iResolution.x;
+  let t = (iTime + iMouse.y) / vec3f(63.0, 78.0, 45.0);
+  let cs = cos(i * pi * 2.0 + vec3f(0.0, 1.0, -0.5) * pi + t);
+  return vec4f(0.5 + 0.5 * cs, 1.0);
+}
+```
+
+Import it, together with the `texture` node function from TSL:
+
+```javascript
+import { wgslFn, uniform, uv, texture } from 'three/tsl';
+
+import plasmaBufferShader from './shaders/plasma/buffer.wgsl?raw';
+import plasmaFragmentShader from './shaders/plasma/fragment.wgsl?raw';
+```
+
+Rendering a shader into a texture works the same as rendering it to the screen: we need a scene with a mesh, a camera, and a call to `renderer.render`. Add the variables for this second scene at the top of your script, right after `plane` and `material`:
+
+```javascript
+let renderTarget, rtScene, rtCamera, rtMaterial;
+```
+
+Shadertoy passes `iTime` and `iMouse` to Buffer A as well, so add a second set of uniforms, right before the existing `uniforms` object:
+
+```javascript
+const rtUniforms = {
+  iTime: uniform(0),
+  iMouse: uniform(new THREE.Vector2(0, 0)),
+  iResolution: uniform(new THREE.Vector2(2, 2)),
+};
+```
+
+In `init`, right after creating the renderer, set up the render target scene: a 2 by 2 plane with the buffer shader as material, viewed by an orthographic camera which shows exactly the -1 to 1 range, so the plane fills the whole render target:
+
+```javascript
+  // shader renderer
+  const effectPlaneGeometry = new THREE.PlaneGeometry(2, 2);
+  const plasmaBuffer = wgslFn(plasmaBufferShader);
+  rtMaterial = new THREE.MeshBasicNodeMaterial();
+  rtMaterial.colorNode = plasmaBuffer({
+    fragCoord: uv().mul(rtUniforms.iResolution),
+    iTime: rtUniforms.iTime,
+    iMouse: rtUniforms.iMouse,
+    iResolution: rtUniforms.iResolution,
+  });
+  const effectPlane = new THREE.Mesh(effectPlaneGeometry, rtMaterial);
+  rtCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  rtScene = new THREE.Scene();
+  rtScene.add(effectPlane);
+  renderTarget = new THREE.RenderTarget(100, 100, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+  });
+  // end shader renderer
+```
+
+The render target is only 100 by 100 pixels: the palette is a smooth gradient, so we don't need more, and the linear filters make sure lookups in between two pixels are interpolated.
+
+In `draw`, update the buffer uniforms and render the buffer scene into the render target, before rendering the main scene. `setRenderTarget(null)` switches back to rendering to the canvas:
+
+```javascript
+const draw = () => {
+  const elapsedTime = clock.getElapsedTime();
+
+  rtUniforms.iTime.value = elapsedTime;
+  rtUniforms.iMouse.value.set(mouse.x, mouse.y);
+  uniforms.iTime.value = elapsedTime * 2;
+  uniforms.iMouse.value.set(mouse.x, mouse.y);
+
+  renderer.setRenderTarget(renderTarget);
+  renderer.render(rtScene, rtCamera);
+  renderer.setRenderTarget(null);
+
+  controls.update();
+  renderer.render(scene, camera);
+};
+```
+
+Nothing changes on screen yet, the plasma is still grayscale. To check the palette, temporarily show the render target texture on the main plane, by replacing the `colorNode` of the main material:
+
+```javascript
+  material.colorNode = texture(renderTarget.texture);
+```
+
+![the color palette rendered into the render target](images/three-shadertoy-04-palette.png)
+
+Remove that line again once you've seen the palette.
+
+### Sampling the texture in the shader
+
+Finally, we'll pass the palette into the plasma shader. In WGSL, sampling a texture needs two things: the texture and a sampler. Add both as parameters to the function, and replace the grayscale return with the texture lookup:
+
+```wgsl
+fn plasma(fragCoord: vec2f, iTime: f32, iMouse: vec2f, iResolution: vec2f, iChannel0: texture_2d<f32>, iChannel0Sampler: sampler) -> vec4f {
+  // ... unchanged ...
+  return textureSample(iChannel0, iChannel0Sampler, vec2f(fract(sum), 0.0));
+}
+```
+
+In javascript, create a texture node from the render target texture, and pass it for **both** parameters. A TSL texture node knows about its texture and its sampler, and hands over the right one depending on the parameter type:
+
+```javascript
+  const plasma = wgslFn(plasmaFragmentShader);
+  // the render target texture is passed twice: once as texture, once as sampler
+  const iChannel0 = texture(renderTarget.texture);
+  material = new THREE.MeshBasicNodeMaterial();
+  material.colorNode = plasma({
+    fragCoord: uv().mul(uniforms.iResolution),
+    iTime: uniforms.iTime,
+    iMouse: uniforms.iMouse,
+    iResolution: uniforms.iResolution,
+    iChannel0: iChannel0,
+    iChannel0Sampler: iChannel0,
+  });
+```
+
+You should see the colored plasma. Compare it with the original on Shadertoy though: ours is quite a bit brighter and washed out.
+
+### Fixing the colors
+
+Three.js does color management: it calculates lighting in a linear color space, and converts the final image to sRGB when it's displayed. Our shader doesn't do any lighting, it outputs colors which are meant to be displayed as-is, like Shadertoy does. Three.js applies its conversion on top of that, which brightens the colors.
+
+As our whole scene consists of the shader, we can switch that conversion off for the entire renderer. Add this line right after creating the renderer:
+
+```javascript
+  // shadertoy shaders output display-ready colors, so skip the linear to sRGB conversion
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+```
+
+(If you combine a shader with regular, lit materials, you'd rather keep the conversion, and mark only the shader output as sRGB. The Blender project in the next section does exactly that.)
+
+![plasma shader on a plane in a three.js scene](images/three-shadertoy-05-final.png)
+
+Orbit around the plane with your mouse: the shader is just a material, so it works from every angle, and you can apply it to any mesh.
+
+For reference, this is the complete `js/script.js`:
+
+```javascript
+// https://www.shadertoy.com/view/XsVSDz
+import * as THREE from 'three/webgpu';
+import { wgslFn, uniform, uv, texture } from 'three/tsl';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+import plasmaBufferShader from './shaders/plasma/buffer.wgsl?raw';
+import plasmaFragmentShader from './shaders/plasma/fragment.wgsl?raw';
+
+const $canvas = document.getElementById('webgl');
+let renderer, camera, scene, controls;
+let clock = new THREE.Clock();
+let plane, material;
+let renderTarget, rtScene, rtCamera, rtMaterial;
+const mouse = new THREE.Vector2();
+
+// uniforms are TSL nodes, we update their .value every frame
+const rtUniforms = {
+  iTime: uniform(0),
+  iMouse: uniform(new THREE.Vector2(0, 0)),
+  iResolution: uniform(new THREE.Vector2(2, 2)),
+};
+const uniforms = {
+  iTime: uniform(0),
+  iMouse: uniform(new THREE.Vector2(0, 0)),
+  iResolution: uniform(new THREE.Vector2(2, 2)),
+};
+
+const init = () => {
+  renderer = new THREE.WebGPURenderer({canvas: $canvas, alpha: false});
+  // shadertoy shaders output display-ready colors, so skip the linear to sRGB conversion
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+
+  // shader renderer
+  const effectPlaneGeometry = new THREE.PlaneGeometry(2, 2);
+  const plasmaBuffer = wgslFn(plasmaBufferShader);
+  rtMaterial = new THREE.MeshBasicNodeMaterial();
+  rtMaterial.colorNode = plasmaBuffer({
+    fragCoord: uv().mul(rtUniforms.iResolution),
+    iTime: rtUniforms.iTime,
+    iMouse: rtUniforms.iMouse,
+    iResolution: rtUniforms.iResolution,
+  });
+  const effectPlane = new THREE.Mesh(effectPlaneGeometry, rtMaterial);
+  rtCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  rtScene = new THREE.Scene();
+  rtScene.add(effectPlane);
+  renderTarget = new THREE.RenderTarget(100, 100, {
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+  });
+  // end shader renderer
+
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 100);
+  camera.position.set(0, 0, 10);
+
+  scene = new THREE.Scene();
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  const geometry = new THREE.PlaneGeometry(2, 2);
+  const plasma = wgslFn(plasmaFragmentShader);
+  // the render target texture is passed twice: once as texture, once as sampler
+  const iChannel0 = texture(renderTarget.texture);
+  material = new THREE.MeshBasicNodeMaterial();
+  material.colorNode = plasma({
+    fragCoord: uv().mul(uniforms.iResolution),
+    iTime: uniforms.iTime,
+    iMouse: uniforms.iMouse,
+    iResolution: uniforms.iResolution,
+    iChannel0: iChannel0,
+    iChannel0Sampler: iChannel0,
+  });
+  plane = new THREE.Mesh(geometry, material);
+  scene.add(plane);
+
+  window.addEventListener('resize', resize);
+  resize();
+
+  window.addEventListener('mousemove', (e) => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+  });
+
+  renderer.setAnimationLoop(draw);
+};
+
+const draw = () => {
+  const elapsedTime = clock.getElapsedTime();
+
+  rtUniforms.iTime.value = elapsedTime;
+  rtUniforms.iMouse.value.set(mouse.x, mouse.y);
+  uniforms.iTime.value = elapsedTime * 2;
+  uniforms.iMouse.value.set(mouse.x, mouse.y);
+
+  renderer.setRenderTarget(renderTarget);
+  renderer.render(rtScene, rtCamera);
+  renderer.setRenderTarget(null);
+
+  controls.update();
+  renderer.render(scene, camera);
+};
+
+const resize = () => {
+  renderer.setSize(window.innerWidth * window.devicePixelRatio, window.innerHeight * window.devicePixelRatio, false);
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+};
+
+init();
+```
+
+Some ideas to go further:
+
+- Pick another shader on Shadertoy. Shaders with only an Image tab need just one WGSL file and no render target. Check the "Shader Inputs" list on Shadertoy to see which uniforms you need to pass in.
+- Apply the material to a different geometry, like a `SphereGeometry` or a `TorusKnotGeometry`.
+
 ## ThreeJS + Blender + Shader
 
 There's one more tutorial on the learning platform, which teaches you how to bake lighting and shadows from Blender into a texture and how to integrate a shadertoy fragment shader into that same ThreeJS scene.
 
 ![3d room with nice shadows and animation](images/three-baked-shader.gif)
 
-That tutorial was recorded with the WebGL renderer, where custom shaders are GLSL strings in a `ShaderMaterial`. With the WebGPU renderer, `ShaderMaterial` is not supported: custom shaders are written in WGSL (which you know from the previous chapter) and plugged into a node material through the `wgslFn` helper from `three/tsl`. The finished projects in `projects/shadertoy` and `projects/blender-three-bake-final` show the full setup, this is the pattern:
+That tutorial was recorded with the WebGL renderer, where custom shaders are GLSL strings in a `ShaderMaterial`. With the WebGPU renderer, `ShaderMaterial` is not supported, so the monitor screen uses the technique from the previous section instead: the shadertoy shader is ported to `shaders/cyberFuji/fragment.wgsl` and plugged into a `MeshBasicNodeMaterial` with `wgslFn`, with `iTime` and `iResolution` uniforms. That shader has a couple of helper functions (`sun`, `grid`, ...). Those go *below* the main function in the WGSL file, as `wgslFn` reads the signature of the first function in the string. The finished project is in `projects/blender-three-bake-final`.
 
-Write your shader as a WGSL function which receives the pixel coordinate and the "uniforms" as regular parameters, and returns the color. Any helper functions go below the main function (`wgslFn` reads the signature of the first function in the string):
-
-```wgsl
-// shaders/cyberFuji/fragment.wgsl
-fn cyberFuji(fragCoord: vec2f, iTime: f32, iResolution: vec2f) -> vec4f {
-  var uv = (2.0 * fragCoord - iResolution) / iResolution.y;
-  // ... shadertoy code, ported to WGSL ...
-  return vec4f(col, 1.0);
-}
-
-fn sun(uv: vec2f, battery: f32, iTime: f32) -> f32 {
-  // ...
-}
-```
-
-In your javascript, import the WGSL as a string (the `?raw` suffix is a Vite feature), create `uniform()` nodes for the values you want to change from javascript, and connect it all to the `colorNode` of a `MeshBasicNodeMaterial`:
+One difference with the plasma project: the room is textured with the baked lighting, so we can't switch off the color conversion of the whole renderer. Instead, we tell three.js that the output of the shader is already sRGB, by wrapping the function call in `colorSpaceToWorking`:
 
 ```javascript
-import * as THREE from 'three/webgpu';
 import { wgslFn, uniform, uv, colorSpaceToWorking } from 'three/tsl';
-import cyberFujiShader from './shaders/cyberFuji/fragment.wgsl?raw';
 
-const iTime = uniform(0);
-const iResolution = uniform(new THREE.Vector2(16, 9));
+// ...
 
-const cyberFuji = wgslFn(cyberFujiShader);
-const material = new THREE.MeshBasicNodeMaterial();
-// parameters are passed by name, fragCoord is calculated from the uv coordinates
-material.colorNode = colorSpaceToWorking(cyberFuji({
+monitorPlaneMaterial.colorNode = colorSpaceToWorking(cyberFuji({
   fragCoord: uv().mul(iResolution),
   iTime,
   iResolution,
 }), THREE.SRGBColorSpace);
 ```
-
-Update the uniforms in your render loop by setting their `.value`:
-
-```javascript
-iTime.value = clock.getElapsedTime();
-```
-
-The `colorSpaceToWorking(..., THREE.SRGBColorSpace)` wrapper tells three.js that the shader outputs display-ready colors (like shadertoy does), so it doesn't brighten them in its color management pass. When your whole scene is a shader, you can set `renderer.outputColorSpace = THREE.LinearSRGBColorSpace` instead, as done in the shadertoy project. That project also shows how to render a shader into a `RenderTarget` and sample it in a second shader, by passing the texture node as both the `texture_2d<f32>` and the `sampler` parameter of your WGSL function.
 
 # Where to go from here
 

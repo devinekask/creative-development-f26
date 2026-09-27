@@ -26,8 +26,6 @@ const uniforms = {
 };
 
 const init = () => {
-  console.log('init');
-
   renderer = new THREE.WebGPURenderer({canvas: $canvas, alpha: false});
   // shadertoy shaders output display-ready colors, so skip the linear to sRGB conversion
   renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
