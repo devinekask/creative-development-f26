@@ -1697,3 +1697,16 @@ More GLSL → WGSL references:
 - https://www.w3.org/TR/webgpu/ & https://www.w3.org/TR/WGSL/ - the specifications
 - https://threejs.org/docs/#api/en/renderers/WebGPURenderer - Three.js has a WebGPU renderer (with its own shader language, TSL) if you want to go 3D
 - https://thebookofshaders.com/ - written for GLSL, but the concepts translate 1:1 to WGSL
+- https://webgpu-ocean.netlify.app/ - WebGPU Ocean (source: https://github.com/matsuoka-601/WebGPU-Ocean)
+- https://waterball.netlify.app/ - WebGPU Waterball (source: https://github.com/matsuoka-601/waterball)
+- https://jeantimex.github.io/fluid/src/flip/2d/hybrid_flip/ - WebGPU 2D Fluid (source: https://github.com/jeantimex/fluid)
+- https://jeantimex.github.io/fluid/src/flip/3d/webgpu_flip/ - WebGPU 3D Fluid (source: https://github.com/jeantimex/fluid)
+- https://web-splat.niedermayr.dev/demo.html - Gaussian Splat Renderer (source: https://github.com/KeKsBoTer/web-splat)
+- https://www.martin-laxenaire.fr/ - Portfolio (source: https://martinlaxenaire.github.io/gpu-curtains/examples/)
+- https://oidn-web-example.vercel.app/ - Denoiser (source: https://github.com/pissang/oidn-web)
+- https://toji.github.io/webgpu-metaballs/ - WebGPU Metaballs (source: https://github.com/toji/webgpu-metaballs)
+- https://chat.webllm.ai/ - Web LLM (source: https://github.com/mlc-ai/web-llm-chat)
+- https://huggingface.co/spaces/webml-community/DINOv3-video-tracking - Video Tracking
+- https://huggingface.co/spaces/LiquidAI/LFM2-WebGPU - LLM Site Interaction
+- https://huggingface.co/spaces/mistralai/Voxtral-Realtime-WebGPU - Speech Transcription
+- https://huggingface.co/spaces/webml-community/kokoro-webgpu - Text To Speech
