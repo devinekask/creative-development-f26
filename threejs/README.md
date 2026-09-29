@@ -1442,7 +1442,7 @@ monitorPlaneMaterial.colorNode = colorSpaceToWorking(cyberFuji({
 - https://www.youtube.com/watch?v=AB6sulUMRGE - Tutorial: Create a Cute Award-Winning Room Portfolio with Three.js and Blender | Beginner Course
 - https://www.youtube.com/watch?v=X3pPAdQBKHo - Tutorial: Intro to Creative Web Development with Three.js and Blender | Create a 3D Portfolio for Beginners
 - https://www.awwwards.com/websites/webgl/ - award-winning sites built with WebGL
-- https://www.youtube.com/@akella_ - Yuri Artiukh live-codes recreations of award-winning WebGL effects
+- [https://www.youtube.com/@akella_](https://www.youtube.com/@akella_) - Yuri Artiukh live-codes recreations of award-winning WebGL effects
 - https://blog.maximeheckel.com/ - in-depth articles on shaders and creative coding on the web
 - https://r3f.docs.pmnd.rs/ - React Three Fiber: build Three.js scenes with React components, combining this chapter with what you know from React
 - https://poly.pizza/ - free low-poly 3D models to use in your own scenes
